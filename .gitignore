@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller folders
+build/
+dist/
+*.spec
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# IDE files
+.vscode/
+.idea/
+
+# Application logs (from Toxic Shield)
+logs/
+*.csv
+*.log
+
+# Installer / other binaries
+*.exe
+*.dll

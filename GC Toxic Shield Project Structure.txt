@@ -1,0 +1,15 @@
+GC Toxic Shield/
+├── main.py                # Entry point aplikasi (Runner)
+├── requirements.txt       # Daftar library (faster-whisper, customtkinter, dll)
+├── .env                   # Pengaturan environment (opsional)
+├── app/
+│   ├── __init__.py
+│   ├── audio_engine.py    # Logic Faster-Whisper & Silero VAD (Task T1)
+│   ├── detector.py        # Logic Strict Direct Matching (Task T4)
+│   ├── logger_service.py  # Blackbox Logger & Auto-Purge (Task T3)
+│   ├── ui_manager.py      # Dashboard CustomTkinter (Task T5)
+│   └── overlay.py         # Lockdown Overlay logic (Task T5)
+├── models/                # Tempat menyimpan model Whisper (tiny/base)
+├── logs/                  # Tempat file gc_incidents.csv disimpan
+├── assets/                # Logo GC Net dan Icon aplikasi
+└── build_tools/           # Script untuk compile ke .exe (PyInstaller/Nuitka)

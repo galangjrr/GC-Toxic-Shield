@@ -1,0 +1,27 @@
+{
+    "toxic_words": [
+        "kontol",
+        "memek",
+        "ngentot",
+        "pepek",
+        "peler",
+        "itil",
+        "ngewe",
+        "ngentod",
+        "pler",
+        "kunyuk",
+        "pantek",
+        "pante"
+    ],
+    "phonetic_mapping": {
+        "peeler": "peler",
+        "peller": "peler",
+        "dealer": "peler",
+        "fill": "itil",
+        "until": "itil",
+        "mem ek": "memek",
+        "me mek": "memek",
+        "control": "kontol",
+        "k lontol": "kontol"
+    }
+}

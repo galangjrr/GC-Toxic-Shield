@@ -1,0 +1,26 @@
+# ============================================
+# GC Toxic Shield V2 - Dependencies
+# ============================================
+# STT Core (Google Speech via speech_recognition)
+SpeechRecognition>=3.10.0
+PyAudio>=0.2.13
+
+# Audio Metering (VU Meter)
+sounddevice>=0.4.6
+numpy>=1.24.0
+
+# UI Framework
+customtkinter>=5.2.0
+
+# Windows System API
+pywin32>=306
+
+# Utility
+python-dotenv>=1.0.0
+
+# System Tray
+pystray>=0.19.5
+Pillow>=10.0.0
+
+# Build & Packaging
+pyinstaller>=6.0

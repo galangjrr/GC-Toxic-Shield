@@ -1,0 +1,17 @@
+{
+    "password_hash": "2d81b676c38898c9782e5d98f8c9c67673147cf93b14595409e431b6d19f01a3",
+    "password_salt": "869a125ca0daf1982664bc22a0a50a98",
+    "WarningDelaySeconds": 5,
+    "PenaltyResetMinutes": 60,
+    "LockdownDurationSeconds": 60,
+    "LockdownTitle": "PC DIKUNCI",
+    "LockdownMessage": "Anda melanggar aturan berbahasa di GC Net.",
+    "Cycle1_WarningDelay": 5,
+    "Cycle1_LockdownDuration": 60,
+    "Cycle2_WarningDelay": 15,
+    "Cycle2_LockdownDuration": 180,
+    "Cycle3_WarningDelay": 30,
+    "Cycle3_LockdownDuration": 300,
+    "WarningMessageLevel1": "⚠️ Peringatan Pertama\n\nSistem mendeteksi penggunaan kata-kata yang tidak pantas.\nMohon jaga tutur kata Anda.",
+    "WarningMessageLevel2": "⚠️ Peringatan Kedua\n\nAnda KEMBALI menggunakan bahasa yang tidak sopan.\nIni adalah peringatan terakhir sebelum lockdown."
+}
