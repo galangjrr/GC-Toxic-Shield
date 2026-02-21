@@ -29,3 +29,4 @@ logs/
 # Documentation / Internal Notes
 *PRD*.txt
 *.txt
+!requirements.txt
