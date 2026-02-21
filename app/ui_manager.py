@@ -12,6 +12,7 @@ import os
 import csv
 import json
 import threading
+import time
 import logging
 import tkinter as tk
 
@@ -230,6 +231,11 @@ class AdminDashboard:
 
         self._monitor_textbox.configure(state="normal")
         self._monitor_textbox.delete("1.0", "end")
+        
+        # Tambahkan indikator waktu agar user tahu tombol refresh bekerja
+        current_time = time.strftime("%H:%M:%S")
+        self._monitor_textbox.insert("end", f"  [Live Monitor — Diperbarui: {current_time}]\n")
+        self._monitor_textbox.insert("end", "  " + "━" * 80 + "\n\n")
 
         if not buffer:
             self._monitor_textbox.insert("end", "  (Belum ada transkripsi... bicara sekarang!)\n")
@@ -487,9 +493,14 @@ class AdminDashboard:
         if not self._logs_textbox: return
         self._logs_textbox.configure(state="normal")
         self._logs_textbox.delete("1.0", "end")
+        
+        current_time = time.strftime("%H:%M:%S")
+        self._logs_textbox.insert("end", f"  [Log Insiden — Diperbarui: {current_time}]\n")
+        self._logs_textbox.insert("end", "  " + "━" * 80 + "\n\n")
+        
         try:
             if not os.path.exists(CSV_PATH):
-                self._logs_textbox.insert("end", "  (Belum ada log)\n")
+                self._logs_textbox.insert("end", "  (Belum ada log pelanggaran yang tercatat)\n")
             else:
                 with open(CSV_PATH, "r", encoding="utf-8") as f:
                     reader = csv.reader(f)
@@ -505,7 +516,11 @@ class AdminDashboard:
                             self._logs_textbox.insert("end", f"  {ts:<22} {display_text:<35} {words:<20} {sev_icon} {severity:<10}\n")
         except Exception as e:
             self._logs_textbox.insert("end", f"Error: {e}\n")
+            
         self._logs_textbox.configure(state="disabled")
+        try:
+            self._root.update_idletasks()
+        except: pass
 
     # ================================================================
     # TAB 4: SANKSI & PESAN (Timers & Messages)
