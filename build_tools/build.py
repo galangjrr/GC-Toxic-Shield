@@ -109,6 +109,9 @@ def build():
         "--exclude-module", "sklearn",
         "--exclude-module", "tkinter.test",
 
+        # Icon
+        "--icon", os.path.join(PROJECT_ROOT, "assets", "icon.ico"),
+
         # Output
         "--distpath", os.path.join(PROJECT_ROOT, "dist"),
         "--workpath", os.path.join(PROJECT_ROOT, "build"),

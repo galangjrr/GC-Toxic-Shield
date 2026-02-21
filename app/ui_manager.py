@@ -37,7 +37,7 @@ WINDOW_WIDTH = 900
 WINDOW_HEIGHT = 800  # Diperbesar agar semua menu admin muat
 
 # ── Paths (PyInstaller-compatible) ─────────────────────────────
-from app._paths import WORDLIST_PATH, CSV_PATH
+from app._paths import WORDLIST_PATH, CSV_PATH, ICON_ICO_PATH
 
 
 class AdminDashboard:
@@ -107,6 +107,13 @@ class AdminDashboard:
         
         self._root.minsize(800, 500)
         self._root.protocol("WM_DELETE_WINDOW", self._handle_close)
+        
+        # Set Icon
+        try:
+            if os.path.exists(ICON_ICO_PATH):
+                self._root.iconbitmap(ICON_ICO_PATH)
+        except Exception as e:
+            logger.warning("Failed to set window icon: %s", e)
 
         # ── Header ──
         self._build_header()

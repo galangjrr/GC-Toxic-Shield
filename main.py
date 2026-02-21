@@ -100,12 +100,17 @@ _app_mutex = None
 def create_tray_image():
     """
     Membuat icon untuk System Tray.
-    Fallback ke kotak merah jika fungsi gambar gagal.
+    Mencoba load dari assets/icon.png terlebih dahulu.
+    Fallback ke gambar perisai jika file tidak ditemukan.
     """
     try:
         from PIL import Image, ImageDraw
+        from app._paths import ICON_PNG_PATH
         
-        # Buat icon sederhana (Perisai Merah 64x64)
+        if os.path.exists(ICON_PNG_PATH):
+            return Image.open(ICON_PNG_PATH)
+        
+        # Buat icon sederhana (Perisai Merah 64x64) fallback
         width = 64
         height = 64
         image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
