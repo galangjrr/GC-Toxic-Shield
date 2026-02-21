@@ -47,6 +47,18 @@ Mengunci OS tanpa menghancurkan UX Explorer:
 
 ---
 
+## 💻 Instalasi Instan (Client PC)
+
+Pemasangan ke komputer Klien warnet sangat mudah, tidak perlu *Copy-Paste* manual! Langkah-langkahnya:
+1. Buka **PowerShell** pada PC Klien *(Wajib pilih "Run as Administrator")*.
+2. Salin (*Copy*) dan Jalankan (*Paste*) baris perintah sakti di bawah ini:
+   ```powershell
+   iex (irm "https://raw.githubusercontent.com/galangjrr/GC-Toxic-Shield/main/install.ps1")
+   ```
+3. Tekan **Enter**. Aplikasi akan langsung terunduh, terbingkai di `C:\GC Net\`, dan memicu ikon mendarat lurus ke *Desktop* Klien secara ajaib dalam 5 detik!
+
+---
+
 ## ⚙️ Architecture & Build
 Modul `build.py` telah dikonfigurasi secara manual. Cukup jalankan perintah ini di VSCode/Terminal utama:
 ```bash
