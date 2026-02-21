@@ -1027,17 +1027,38 @@ class AdminDashboard:
             # Format: "Index: Name"
             values = [f"{idx}: {name}" for idx, name in devices]
             self._device_dropdown.configure(values=values)
-            self._device_dropdown.set(values[0])
+            
+            current_idx = self._engine.input_device_index
+            target_val = values[0]
+            if current_idx is not None:
+                for v in values:
+                    if v.startswith(str(current_idx) + ":"):
+                        target_val = v
+                        break
+            self._device_dropdown.set(target_val)
         else:
             self._device_dropdown.configure(values=["No devices found"])
+
+    def sync_audio_ui(self):
+        """Dipanggil dari main.py setelah engine ditempel ke dashboard."""
+        if not self._engine: return
+        self._populate_devices()
+        
+        current_gain = self._engine.gain
+        if hasattr(self, '_gain_slider') and self._gain_slider:
+            self._gain_slider.set(current_gain)
+        if hasattr(self, '_gain_label') and self._gain_label:
+            self._gain_label.configure(text=f"{current_gain:.1f}x")
 
     def _on_device_change(self, choice):
         """Callback saat device dipilih."""
         if not self._engine: return
         try:
-            # Parse index dari string "0: Microphone (Realtek...)"
             device_index = int(choice.split(":")[0])
             self._engine.set_input_device(device_index)
+            if self._auth_service:
+                self._auth_service.save_config("InputDeviceIndex", device_index)
+                logger.info("Saved default InputDeviceIndex: %d", device_index)
         except Exception as e:
             logger.error("Failed to set device: %s", e)
 
@@ -1047,6 +1068,8 @@ class AdminDashboard:
         self._engine.set_gain(value)
         if self._gain_label:
             self._gain_label.configure(text=f"{value:.1f}x")
+        if self._auth_service:
+            self._auth_service.save_config("AudioGain", value)
 
     # ── Existing Admin Callbacks ──
 

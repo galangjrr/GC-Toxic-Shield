@@ -39,7 +39,7 @@ logger = logging.getLogger("GCToxicShield")
 
 # ── Constants ────────────────────────────────────────────────
 APP_NAME = "GC Toxic Shield"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 BRAND = "GC Net Security Suite"
 GITHUB_REPO = "galangjrr/GC-Toxic-Shield"  # <-- Admin warns to replace this
 
@@ -237,8 +237,18 @@ def main():
             if result.is_toxic:
                 penalty_mgr.execute_sanction(result.matched_words)
 
-        engine = AudioEngine(language="id-ID", on_transcription=on_transcription)
+        # ── Load Saved Audio Configurations ──
+        saved_device_idx = auth_service.get_config("InputDeviceIndex", None)
+        saved_gain = auth_service.get_config("AudioGain", 1.0)
+        
+        engine = AudioEngine(
+            language="id-ID", 
+            on_transcription=on_transcription,
+            input_device_index=saved_device_idx,
+            initial_gain=saved_gain
+        )
         dashboard._engine = engine
+        dashboard.sync_audio_ui()
 
         # ── Start Services ──
         if SystemService.is_autostart_enabled():
