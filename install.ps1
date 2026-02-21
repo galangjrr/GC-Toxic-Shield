@@ -60,8 +60,15 @@ try {
     }
 }
 catch {
-    Write-Error "GAGAL mengakses GitHub API. Pastikan nama repository benar dan publik."
-    Write-Error $_.Exception.Message
+    if ($_.Exception.Message -match "404") {
+        Write-Error "API GitHub mengembalikan error 404 (Not Found)."
+        Write-Error "🚨 PENTING: Anda belum membuat 'Release' publik di repository GitHub Anda!"
+        Write-Error "🚨 Silakan buka GitHub -> Releases -> Draft a new release -> Unggah GC Toxic Shield.zip."
+    }
+    else {
+        Write-Error "GAGAL mengakses GitHub API. Pastikan nama repository benar dan publik."
+        Write-Error $_.Exception.Message
+    }
     Exit
 }
 
