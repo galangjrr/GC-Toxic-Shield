@@ -1,4 +1,4 @@
-# 🛡️ GC Toxic Shield V2
+# 🛡️ GC Toxic Shield
 **Brand:** GC Net Security Suite  
 **Version:** 2.1.0 (Google Speech Edition)  
 **Target OS:** Windows 10/11 x64  
@@ -15,70 +15,59 @@
 
 Jika pelanggaran terdeteksi, sistem akan mengaktifkan mekanisme peringatan visual agresif atau mengunci layar (Lockdown Overlay) untuk menegakkan disiplin bermain secara preventif, memastikan lingkungan warnet tetap nyaman dan ramah.
 
-### 🚀 Apa yang baru di V2?
-Pada versi 2.1.0, *GC Toxic Shield* telah sepenuhnya bertransisi dari *offline engine* yang berat menjadi **Cloud-Based Online Engine (Google Speech Recognition)**.
-- **⚡ Ultra-ringan:** Ukuran aplikasi turun drastis dari `~500MB` menjadi `~65MB`.
-- **💻 Performa Maksimal:** Beban memori dan CPU ditekan hingga angka terkecil, memastikan perlindungan tidak mengganggu *Frame Rate (FPS)* game berat PC *client*.
-- **🎙️ Smart Digital Gain:** Otomatis menyesuaikan volume dari mic *low-sensitivity* (misal: Fantech HQ 53).
-- **📝 Pemetaan Fonetik Cerdas:** Otomatis menerjemahkan misheard words/plesetan (seperti *peeler* -> *peler*) menjadi deteksi akurat.
+### 🚀 Apa yang baru di Edisi 2.1.0?
+*GC Toxic Shield* kini telah sepenuhnya bertransisi ke **Cloud-Based Online Engine (Google Speech Recognition)**.
+- **⚡ Ultra-ringan:** Ukuran aplikasi dipangkas drastis dari `~500MB` menjadi `~65MB`.
+- **💻 Performa Maksimal:** Beban statis memori dan CPU ditekan, tidak mengganggu *Frame Rate (FPS)* PC *client*.
+- **🎙️ Smart Digital Gain:** Manajemen volume ganda untuk mic *low-sensitivity* langsung dari Admin Dashboard.
 
 ---
 
 ## 🛠️ Key Features
 
-### 1. 📡 Real-time Non-Stop Engine
-- **Cloud STT:** Mentranskripsi suara langsung dari mikrofon melalui Google Speech (id-ID).
-- **Auto-Recover:** Secara agresif merecover koneksi *Audio Driver* jika terjadi *WinError 50* atau *disconnect*.
-- **Overlap Protection:** Tidak mencatat pelanggaran bertumpuk saat jendela *Lockdown* sedang aktif.
+### 1. 🚨 Extended Penalty System (15-Level Cascade)
+Sistem memiliki rekam jejak jumlah pelanggaran untuk setiap komputer (hingga riwayatnya diputihkan):
+- **Sistem Ganda (2 Warning + 1 Lockdown):** Tiap kelipatan 3, layar pengguna akan dikunci penuh untuk melumpuhkan fungsi PC dalam rentang durasi 1 Menit hingga kemuncaknya di **20 Menit**. (Level 3, 6, 9, 12, 15).
+- **Hardened Admin Override:** *Lockdown Overlay* memiliki *password form* tersembunyi. Admin dapat memencet tombol rahasia untuk membypass hukuman, _namun_ ini tidak akan mereset hitungan "dosa" anak tersebut kembali ke nol kecuali Admin memutihkannya sengaja ke panel Dashboard.
+- **Auto-Forgive:** Pelanggaran akan diriset otomatis ke nol jika pengguna bersih dan bersikap baik selama 60 menit.
 
-### 2. 🛡️ Strict Wordlist Matching
-- **Regex Boundaries:** Mencocokkan kata menggunakan *whole-word regex* (`\b`), mencegah *false positive* (contoh: "kontrol" tidak akan terdeteksi sebagai "kontol").
-- **Hot-Reload:** Administrator dapat menambah/menghapus daftar kata melalui UI Dashboard, dan sistem *detector* akan diperbarui saat itu juga tanpa *restart*.
+### 2. 🛡️ Surgical Desktop Guard & Settings Block
+Mengunci OS tanpa menghancurkan UX Explorer:
+- **Block Editing (Anti-Iseng):** Pengguna dapat me-*refresh* desktop tanpa *bug* ikon lenyap, namun dilarang keras membuat folder, menghapus, ataupun mengutip data asing ke layar Desktop (otomatis dihapus dalam hitungan ms oleh *Watchdog Engine* lalu dtegur visual).
+- **Settings Lock:** Memutus akses ke App *Settings* Windows & *Control Panel* untuk melumpuhkan upaya *tampering*.
 
-### 3. 🚨 Tiered Intervention System (Sanksi 3 Tingkat)
-Sistem memiliki memori jumlah pelanggaran dan bereskalasi otomatis:
-- **Pelanggaran 1-2:** Memunculkan *Warning Box* di tengah layar.
-- **Pelanggaran 3:** Memicu *Lockdown Overlay* (Layar dihitamkan dengan pesan kutipan, blokir input *keyboard* sementara).
-- **Admin Override:** *Lockdown Overlay* memiliki *password form* rahasia agar operator dapat membuka PC sewaktu-waktu secara manual.
-- **Auto-Forgive:** Penghitungan pelanggaran akan direset kembali ke nol jika *user* berkelakuan baik (tidak melanggar) selama durasi tertentu (*default*: 60 menit).
+### 3. 📡 Non-Stop Cloud Detection
+- **Cloud STT id-ID:** Sensor *Speech-to-Text* langsung melalui Google Cloud dan Regex Exact Word Boundary.
+- **Auto-Recover:** Secara agresif merecover dan mereset port jika Audio Driver tiba-tiba mati/tercabut secara iseng (*WinError 50* handling).
+- **Hot-Reload Wordlist:** Perbarui daftar "Kata Utama" dan "Kata Alias/Typo" dari antarmuka Admin secara instan.
 
-### 4. 🧹 Self-Cleaning Logs & Privacy
-- **Volatile Live Monitor:** Menampilkan teks transkripsi ke Admin Dashboard untuk dipantau secara langsung, lalu dibersihkan total setelah beberapa waktu (T3). 
-- **Incident Storage:** Hanya kalimat yang secara positif *terbukti* mengeluarkan kata toxic yang akan diabadikan di `logs/toxic_incidents.csv`. *Privacy first!*
+### 4. 🔄 GitHub Auto-Updater & One-Click Deploy
+- **1-Liner PowerShell Installer:** Cukup pastekan *script* pendek di PowerShell Administrator masing-masing PC klien, dan GC Toxic Shield akan mengunduh otomatis dari rilis repositori GitHub Anda dan menaruh pintasan di Desktop.
+- **In-App Updater:** Terdapat tombol *Update* di dalam *Dashboard Admin*. Ia membaca _latest release_ dari GitHub dan dengan mulus me-rekonstruksi *executable* tanpa merusak konfigurasi JSON lokal dari Warnet.
 
 ---
 
 ## ⚙️ Architecture & Build
-
-Karena peralihan dari *offline* ke *online*, pastikan PC *Client* **memiliki akses internet stabil**.
-
-**Kompilasi ke Executable:**
-Modul `build.py` telah dikonfigurasi secara manual. Cukup jalankan:
+Modul `build.py` telah dikonfigurasi secara manual. Cukup jalankan perintah ini di VSCode/Terminal utama:
 ```bash
 python build_tools/build.py
 ```
-Aplikasi akan dibungkus sebagai `GCToxicShield.exe` satu folder (*one-dir*) untuk startup sistem operasi yang lebih cepat.
+Aplikasi akan dibungkus sebagai `GCToxicShield.exe` tanpa bloatware sistem ke dalam folder `dist/GCToxicShield`.
 
 ---
 
 ## 🎮 Windows Defender & Anti-Cheat Compatibility
-GC Toxic Shield menggunakan teknik **Win32 API Global Keyboard Hooks** untuk memblokir input *Alt+Tab* dan *Windows Key* saat *Lockdown Overlay* aktif. Teknik ini diwajikan untuk mencegah pengguna mencurangi sistem sanksi warnet.
+Aplikasi ini memanfaatkan pelacakan UI paksa yang menggunakan **Win32 API Global Keyboard Hooks** untuk memblokir aksi *Alt+Tab* dan tombol *Windows* saat hukuman *Lockdown* jatuh.
 
-Namun, meng-hook input secara global sering kali dicurigai oleh sistem keamanan:
-1. **Windows Defender / Antivirus:** Karena aplikasi ini di-*build* dengan PyInstaller dan tidak memiliki sertifikat *Digital Signature* (Code Signing Certificate) berbayar, AV mungkin mendeteksinya sebagai *False Positive* (misal: `Trojan:Win32/Wacatac` atau serupa).
-   - **Solusi:** Tambahkan folder `dist/GCToxicShield/` ke dalam **Exclusion / Pengecualian** Windows Defender di tiap PC Client.
-   - *Architecture note:* Build versi *Production* menggunakan mode `--windowed` (tanpa console) dan `--onedir` (tanpa temp extraction) untuk meminimalkan deteksi heuristik sejauh mungkin.
-2. **Game Anti-Cheat (Vanguard, XignCode, HackShield, dll):** Anti-cheat tingkat *Kernel (Ring-0)* seperti *Valorant Vanguard* sangat agresif terhadap *overlay* atau *hook* dari aplikasi pihak ketiga yang tidak tersertifikasi. 
-   - Aplikasi ini didesain se-*pasif* mungkin (hanya meng-*hook* saat *lockdown* terjadi). 
-   - **Solusi:** Pastikan folder aplikasi dimasukkan ke *whitelist* Anti-Cheat jika memungkinkan, atau jika masih terjadi konflik saat *lockdown*, pertimbangkan mematikan fitur *Lockdown Overlay* dan cukup gunakan *WarningBox* saja.
-
+- **Windows Defender:** Tambahkan jalur instalasi (`C:\GC Net\GC Toxic Shield`) ke daftar pengecualian/whitelist Defender agar fitur Desktop Guard tidak teridentifikasi sebagai *Trojan* atau pembatasan sistem iseng.
+- **Game Anti-Cheat (Vanguard):** Dirancang se-*pasif* mungkin (hanya meng-*hook* saat *lockdown* terjadi). Matikan *hooking* dan blokir manual dengan izin akses jika *Client* memainkan Valorant.
 
 ---
 
 ## 🔒 Security
-- **UAC Manifest:** `.exe` secara inheren akan selalu meminta akses *Administrator* agar *Keyboard Hook* *Overlay System* dapan berjalan di atas game *Full-Screen*.
-- **Dashboard Authentication:** UI Admin disembunyikan total di latar belakang. Saat aplikasi pertama berjalan/saat dibuka lewat tray, perlu *Password Authentication* untuk membukanya.
-- **Secure Exit:** Menutup (*Exit*) aplikasi juga memerlukan *Password Administrator*.
+- **UAC Manifest:** Memerlukan akses *Administrator* wajib.
+- **Anti-Brute Force:** Pemasukan *Password* palsu di menu Lockdown akan berbuah hukuman penguncian paksa hingga 30 menit.
+- **Dashboard Authentication:** Hanya dapat diakses dan ditutup total melalui *Password Admin* terotentikasi SHA256 (Default `admin123`).
 
 ---
 *Developed for GC Net.*

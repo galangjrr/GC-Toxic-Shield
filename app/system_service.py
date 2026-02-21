@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Task T6: System Service Utilities
+# GC Toxic Shield — Task T6: System Service Utilities
 # =============================================================
 # Module ini bertanggung jawab untuk:
 # 1. Auto-Start via Windows Registry (HKCU\...\Run)

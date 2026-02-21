@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Main Entry Point
+# GC Toxic Shield — Main Entry Point
 # =============================================================
 # Runner utama yang menghubungkan semua modul:
 # - T1: AudioEngine  (faster-whisper + VAD, OFFLINE ONLY)

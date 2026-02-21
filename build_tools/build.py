@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — PyInstaller Build Script
+# GC Toxic Shield — PyInstaller Build Script
 # =============================================================
 # Engine Swap T9: Sekarang pakai Google Speech (online).
 # Build jadi JAUH lebih kecil (~20MB vs ~500MB+)

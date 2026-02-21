@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Penalty Manager (Config-Driven)
+# GC Toxic Shield — Penalty Manager (Config-Driven)
 # =============================================================
 # Modular sanction executor yang sepenuhnya dikendalikan oleh
 # data sanction_list di config.json.

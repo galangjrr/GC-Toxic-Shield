@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Auth Service
+# GC Toxic Shield — Auth Service
 # =============================================================
 # Module ini bertanggung jawab untuk:
 # 1. Password hashing (SHA256 + random salt)

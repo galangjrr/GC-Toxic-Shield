@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Task T5: Admin Dashboard (CustomTkinter)
+# GC Toxic Shield — Task T5: Admin Dashboard (CustomTkinter)
 # =============================================================
 # Module ini bertanggung jawab untuk:
 # 1. Tab Live Monitor: Transkripsi real-time + VU Meter
@@ -167,7 +167,7 @@ class AdminDashboard:
 
         title = ctk.CTkLabel(
             header,
-            text="🛡️ GC Toxic Shield V2",
+            text="🛡️ GC Toxic Shield",
             font=ctk.CTkFont(size=22, weight="bold"),
         )
         title.pack(side="left", padx=15)

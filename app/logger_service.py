@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Task T3: Self-Cleaning Monitor & Logger
+# GC Toxic Shield — Task T3: Self-Cleaning Monitor & Logger
 # =============================================================
 # Module ini bertanggung jawab untuk:
 # 1. Menyimpan transkripsi aman di temp_buffer (volatile/RAM)

@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Login Dialog (CustomTkinter)
+# GC Toxic Shield — Login Dialog (CustomTkinter)
 # =============================================================
 # Modal login dialog yang muncul:
 # - Saat aplikasi pertama dibuka

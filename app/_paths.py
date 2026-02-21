@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Runtime Path Resolver
+# GC Toxic Shield — Runtime Path Resolver
 # =============================================================
 # Modul ini menyediakan path resolution yang kompatibel dengan:
 # - Mode development (python main.py)

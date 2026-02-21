@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Task T4: Direct Match Detection
+# GC Toxic Shield — Task T4: Direct Match Detection
 # =============================================================
 # Module ini bertanggung jawab untuk:
 # 1. Membaca daftar kata toxic dari word_list.json

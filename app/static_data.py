@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Static Data (Messages & Quotes)
+# GC Toxic Shield — Static Data (Messages & Quotes)
 # =============================================================
 # Menyediakan pesan peringatan dan kutipan motivasi
 # untuk sistem Warning & Lockdown.

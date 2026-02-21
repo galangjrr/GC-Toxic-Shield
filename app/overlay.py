@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Tiered Warning & Lockdown Overlay
+# GC Toxic Shield — Tiered Warning & Lockdown Overlay
 # =============================================================
 # Sistem penindakan:
 #   Level 1-2 (mod 3): WarningBox (pesan + tombol delayed)

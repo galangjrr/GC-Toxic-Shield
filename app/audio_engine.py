@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield V2 — Audio Engine (Google Speech Online)
+# GC Toxic Shield — Audio Engine (Google Speech Online)
 # =============================================================
 # T9: Google Speech Recognition (online, id-ID)
 # T11: Post-Lockdown Latency Fix
