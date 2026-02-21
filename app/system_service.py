@@ -143,6 +143,67 @@ class SystemService:
             return False
 
     # ================================================================
+    # GROUP POLICY — LOCK WINDOWS SETTINGS
+    # ================================================================
+
+    POLICIES_EXPLORER_PATH = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+
+    @staticmethod
+    def toggle_windows_settings(enable_lock: bool) -> bool:
+        """
+        Lock/unlock Windows Settings & Control Panel via Registry.
+
+        Target: HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer
+        Value:  NoControlPanel (REG_DWORD)
+
+        Args:
+            enable_lock: True  → set NoControlPanel=1 (Settings blocked)
+                         False → delete NoControlPanel   (Settings accessible)
+
+        Returns:
+            True if operation succeeded.
+        """
+        try:
+            import winreg
+
+            if enable_lock:
+                # Create key if it doesn't exist, then set value
+                key = winreg.CreateKeyEx(
+                    winreg.HKEY_CURRENT_USER,
+                    SystemService.POLICIES_EXPLORER_PATH,
+                    0,
+                    winreg.KEY_SET_VALUE,
+                )
+                winreg.SetValueEx(key, "NoControlPanel", 0, winreg.REG_DWORD, 1)
+                winreg.CloseKey(key)
+                logger.info("✓ Windows Settings LOCKED (NoControlPanel=1)")
+            else:
+                try:
+                    key = winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        SystemService.POLICIES_EXPLORER_PATH,
+                        0,
+                        winreg.KEY_SET_VALUE,
+                    )
+                    winreg.DeleteValue(key, "NoControlPanel")
+                    winreg.CloseKey(key)
+                    logger.info("✓ Windows Settings UNLOCKED (NoControlPanel removed)")
+                except FileNotFoundError:
+                    logger.info("NoControlPanel was not set — already unlocked")
+
+            return True
+
+        except ImportError:
+            logger.error("winreg not available (non-Windows OS)")
+            return False
+        except PermissionError:
+            logger.error("✗ Permission denied — run as Administrator")
+            return False
+        except Exception as e:
+            logger.error("✗ Failed to toggle Windows Settings: %s", e)
+            return False
+
+    # ================================================================
     # EMERGENCY SAFETY EXIT
     # ================================================================
 

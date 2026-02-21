@@ -50,16 +50,21 @@ class AdminDashboard:
         self,
         logger_service: "LoggerService",
         detector: "ToxicDetector",
-        lockdown_mgr=None,
+        penalty_mgr=None,
         engine=None,
         auth_service=None,
+        app_version: str = "1.0.0",
+        github_repo: str = "",
         on_close: Optional[Callable] = None,
     ):
         self._logger_service = logger_service
         self._detector = detector
-        self._lockdown_mgr = lockdown_mgr
+        self._penalty_mgr = penalty_mgr
         self._engine = engine
         self._auth = auth_service
+        self._app_version = app_version
+        self._github_repo = github_repo
+        self._desktop_guard = None  # Akan diset dari main.py
         self._on_close = on_close
         self._root: Optional[ctk.CTk] = None
         self._timers = []
@@ -124,7 +129,7 @@ class AdminDashboard:
 
         # Create tabs
         tab_monitor = self._tabview.add("📡 Monitor")
-        tab_wordlist = self._tabview.add("📝 Wordlist")
+        tab_wordlist = self._tabview.add("📝 Daftar Kata")
         tab_logs = self._tabview.add("📊 Logs")
         tab_sanctions = self._tabview.add("📜 Sanksi & Pesan")
         tab_admin = self._tabview.add("⚙ Admin")
@@ -287,156 +292,234 @@ class AdminDashboard:
     # ================================================================
 
     def _build_wordlist_tab(self, parent):
-        """Same as before."""
-        # ── Left: Input ──
-        input_frame = ctk.CTkFrame(parent, width=300)
-        input_frame.pack(side="left", fill="y", padx=(5, 5), pady=5)
-        input_frame.pack_propagate(False)
+        """Tab Daftar Kata: 2 Kolom (Kata Utama vs Variasi/Alias)."""
+
+        main_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        main_frame.grid_columnconfigure((0, 1), weight=1)
+
+        # ── Kolom Kiri: Kata Terlarang (Blocked Words) ──
+        left_col = ctk.CTkFrame(main_frame)
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
 
         ctk.CTkLabel(
-            input_frame,
-            text="Tambah Kata Toxic",
-            font=ctk.CTkFont(size=15, weight="bold"),
+            left_col, text="🚫 Daftar Kata Terlarang", font=ctk.CTkFont(size=16, weight="bold")
         ).pack(pady=(10, 5))
 
-        self._word_entry = ctk.CTkEntry(
-            input_frame,
-            placeholder_text="Ketik kata baru...",
-            height=38,
-        )
-        self._word_entry.pack(fill="x", padx=10, pady=5)
-        self._word_entry.bind("<Return>", lambda e: self._add_word())
-
-        btn_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=10, pady=5)
-
-        ctk.CTkButton(
-            btn_frame,
-            text="➕ Tambah",
-            height=35,
-            command=self._add_word,
-            fg_color="#2e7d32",
-            hover_color="#1b5e20",
-        ).pack(fill="x", pady=2)
-
-        ctk.CTkButton(
-            btn_frame,
-            text="🗑️ Hapus Terpilih",
-            height=35,
-            command=self._remove_word,
-            fg_color="#c62828",
-            hover_color="#b71c1c",
-        ).pack(fill="x", pady=2)
-
-        ctk.CTkButton(
-            btn_frame,
-            text="🔄 Reload",
-            height=35,
-            command=self._reload_wordlist,
-        ).pack(fill="x", pady=2)
-
-        self._wordcount_label = ctk.CTkLabel(
-            input_frame, text="", font=ctk.CTkFont(size=12), text_color="#aaaaaa"
-        )
-        self._wordcount_label.pack(pady=(10, 0))
-
-        # ── Right: List ──
-        list_frame = ctk.CTkFrame(parent)
-        list_frame.pack(side="right", fill="both", expand=True, padx=(0, 5), pady=5)
-
-        ctk.CTkLabel(
-            list_frame, text="Daftar Kata Toxic", font=ctk.CTkFont(size=15, weight="bold")
-        ).pack(pady=(10, 5))
-
-        listbox_container = ctk.CTkFrame(list_frame)
-        listbox_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        listbox_frame_l = ctk.CTkFrame(left_col)
+        listbox_frame_l.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         self._wordlist_listbox = tk.Listbox(
-            listbox_container,
-            font=("Consolas", 13),
-            bg="#2b2b2b", fg="#ffffff",
-            selectbackground="#1a73e8", selectforeground="#ffffff",
-            borderwidth=0, highlightthickness=0, activestyle="none",
+            listbox_frame_l, font=("Consolas", 13),
+            bg="#2b2b2b", fg="#ffffff", selectbackground="#c62828",
+            borderwidth=0, highlightthickness=0, activestyle="none"
         )
-        self._wordlist_listbox.pack(fill="both", expand=True)
+        self._wordlist_listbox.pack(side="left", fill="both", expand=True)
+        scroll_l = ctk.CTkScrollbar(listbox_frame_l, command=self._wordlist_listbox.yview)
+        scroll_l.pack(side="right", fill="y")
+        self._wordlist_listbox.configure(yscrollcommand=scroll_l.set)
 
-        scrollbar = ctk.CTkScrollbar(listbox_container, command=self._wordlist_listbox.yview)
-        scrollbar.pack(side="right", fill="y")
-        self._wordlist_listbox.configure(yscrollcommand=scrollbar.set)
+        self._wordlist_listbox.bind("<<ListboxSelect>>", self._on_word_select)
 
-        self._refresh_wordlist_display()
+        # Input & Tombol Kiri
+        input_frame_l = ctk.CTkFrame(left_col, fg_color="transparent")
+        input_frame_l.pack(fill="x", padx=10, pady=(0, 10))
+
+        self._word_entry = ctk.CTkEntry(input_frame_l, placeholder_text="Tambah kata utama baru...", height=35)
+        self._word_entry.pack(fill="x", pady=(0, 5))
+        self._word_entry.bind("<Return>", lambda e: self._add_word())
+
+        btn_row_l = ctk.CTkFrame(input_frame_l, fg_color="transparent")
+        btn_row_l.pack(fill="x")
+        ctk.CTkButton(
+            btn_row_l, text="➕ Tambah", width=100, fg_color="#2e7d32", hover_color="#1b5e20", command=self._add_word
+        ).pack(side="left", expand=True, fill="x", padx=(0, 5))
+        ctk.CTkButton(
+            btn_row_l, text="🗑️ Hapus", width=100, fg_color="#c62828", hover_color="#b71c1c", command=self._remove_word
+        ).pack(side="left", expand=True, fill="x")
+
+        # ── Kolom Kanan: Variasi / Alias (Mirip / Typo) ──
+        right_col = ctk.CTkFrame(main_frame)
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+
+        ctk.CTkLabel(
+            right_col, text="🔠 Variasi / Alias Kata (Diizinkan jika ada typo)", font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=(10, 5))
+        
+        self._alias_subtitle = ctk.CTkLabel(
+            right_col, text="Pilih kata di kolom kiri terlebih dahulu.", font=ctk.CTkFont(size=12), text_color="#aaaaaa"
+        )
+        self._alias_subtitle.pack(pady=(0, 5))
+
+        listbox_frame_r = ctk.CTkFrame(right_col)
+        listbox_frame_r.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        self._alias_listbox = tk.Listbox(
+            listbox_frame_r, font=("Consolas", 13),
+            bg="#2b2b2b", fg="#ffffff", selectbackground="#1a73e8",
+            borderwidth=0, highlightthickness=0, activestyle="none",
+            state="disabled"
+        )
+        self._alias_listbox.pack(side="left", fill="both", expand=True)
+        scroll_r = ctk.CTkScrollbar(listbox_frame_r, command=self._alias_listbox.yview)
+        scroll_r.pack(side="right", fill="y")
+        self._alias_listbox.configure(yscrollcommand=scroll_r.set)
+
+        # Input & Tombol Kanan
+        input_frame_r = ctk.CTkFrame(right_col, fg_color="transparent")
+        input_frame_r.pack(fill="x", padx=10, pady=(0, 10))
+
+        self._alias_entry = ctk.CTkEntry(input_frame_r, placeholder_text="Tambah variasi / typo...", height=35, state="disabled")
+        self._alias_entry.pack(fill="x", pady=(0, 5))
+        self._alias_entry.bind("<Return>", lambda e: self._add_alias())
+
+        btn_row_r = ctk.CTkFrame(input_frame_r, fg_color="transparent")
+        btn_row_r.pack(fill="x")
+        self._btn_add_alias = ctk.CTkButton(
+            btn_row_r, text="➕ Tambah", width=100, fg_color="#2e7d32", hover_color="#1b5e20", command=self._add_alias, state="disabled"
+        )
+        self._btn_add_alias.pack(side="left", expand=True, fill="x", padx=(0, 5))
+        self._btn_add_alias_del = ctk.CTkButton(
+            btn_row_r, text="🗑️ Hapus", width=100, fg_color="#c62828", hover_color="#b71c1c", command=self._remove_alias, state="disabled"
+        )
+        self._btn_add_alias_del.pack(side="left", expand=True, fill="x")
+
+        # Reload Button (Global)
+        ctk.CTkButton(
+            parent, text="🔄 Segarkan (Reload Detector)", height=35, command=self._reload_wordlist
+        ).pack(fill="x", padx=10, pady=(0, 10))
+
+        # Initial Load
+        self._selected_word = None
+        self._refresh_words_display()
+
+    # ── Callbacks Kiri (Words) ──
+    def _refresh_words_display(self):
+        if not self._wordlist_listbox: return
+        data = self._load_wordlist_json()
+        toxic_words = sorted(set(data.get("toxic_words", [])))
+        
+        self._wordlist_listbox.delete(0, "end")
+        for word in toxic_words:
+            self._wordlist_listbox.insert("end", f"  {word}")
+            
+        # Reset selection state
+        self._selected_word = None
+        self._refresh_aliases_display()
+
+    def _on_word_select(self, event=None):
+        sel = self._wordlist_listbox.curselection()
+        if not sel:
+            self._selected_word = None
+        else:
+            self._selected_word = self._wordlist_listbox.get(sel[0]).strip()
+        self._refresh_aliases_display()
 
     def _add_word(self):
-        if not self._word_entry: return
         word = self._word_entry.get().strip().lower()
         if not word: return
         
         data = self._load_wordlist_json()
-        words = data["toxic_words"]
+        words = data.get("toxic_words", [])
         
         if word in [w.lower() for w in words]:
             self._word_entry.delete(0, "end")
             return
             
         words.append(word)
-        data["toxic_words"] = words # update ref
+        data["toxic_words"] = words
         self._save_wordlist_json(data)
         
         self._detector.reload_wordlist()
-        self._refresh_wordlist_display()
+        self._refresh_words_display()
         self._word_entry.delete(0, "end")
 
     def _remove_word(self):
-        if not self._wordlist_listbox: return
-        selection = self._wordlist_listbox.curselection()
-        if not selection: return
-        
-        # Get displayed string (contains alias info)
-        display_text = self._wordlist_listbox.get(selection[0])
-        # Extract word (remove padding match and alias part)
-        # Format: "  word  (alias: ...)"
-        word_to_remove = display_text.split("(")[0].strip()
+        if not self._selected_word: return
         
         data = self._load_wordlist_json()
-        words = data["toxic_words"]
+        words = data.get("toxic_words", [])
+        mapping = data.get("phonetic_mapping", {})
         
-        # Remove word
-        words = [w for w in words if w.lower() != word_to_remove.lower()]
+        # Hapus kata
+        words = [w for w in words if w.lower() != self._selected_word.lower()]
         data["toxic_words"] = words
+        
+        # Hapus semua alias yang merujuk ke kata tersebut
+        keys_to_delete = [k for k, v in mapping.items() if v.lower() == self._selected_word.lower()]
+        for k in keys_to_delete:
+            del mapping[k]
+        data["phonetic_mapping"] = mapping
         
         self._save_wordlist_json(data)
         self._detector.reload_wordlist()
-        self._refresh_wordlist_display()
+        self._refresh_words_display()
+
+    # ── Callbacks Kanan (Aliases) ──
+    def _refresh_aliases_display(self):
+        if not self._alias_listbox: return
+        
+        self._alias_listbox.configure(state="normal")
+        self._alias_listbox.delete(0, "end")
+        
+        if not self._selected_word:
+            self._alias_subtitle.configure(text="Pilih kata di kolom kiri terlebih dahulu.")
+            self._alias_entry.configure(state="disabled")
+            self._btn_add_alias.configure(state="disabled")
+            self._btn_add_alias_del.configure(state="disabled")
+            self._alias_listbox.configure(state="disabled")
+            return
+            
+        self._alias_subtitle.configure(text=f"Alias untuk: '{self._selected_word}'")
+        self._alias_entry.configure(state="normal")
+        self._btn_add_alias.configure(state="normal")
+        self._btn_add_alias_del.configure(state="normal")
+        
+        data = self._load_wordlist_json()
+        mapping = data.get("phonetic_mapping", {})
+        
+        # Cari semua key (alias) yang valuenya adalah word yang terpilih
+        aliases = sorted([k for k, v in mapping.items() if v.lower() == self._selected_word.lower()])
+        for alias in aliases:
+            self._alias_listbox.insert("end", f"  {alias}")
+
+    def _add_alias(self):
+        if not self._selected_word: return
+        alias = self._alias_entry.get().strip().lower()
+        if not alias: return
+        
+        data = self._load_wordlist_json()
+        mapping = data.get("phonetic_mapping", {})
+        
+        mapping[alias] = self._selected_word.lower()
+        data["phonetic_mapping"] = mapping
+        
+        self._save_wordlist_json(data)
+        self._detector.reload_wordlist()
+        self._refresh_aliases_display()
+        self._alias_entry.delete(0, "end")
+
+    def _remove_alias(self):
+        if not self._selected_word: return
+        sel = self._alias_listbox.curselection()
+        if not sel: return
+        alias_to_remove = self._alias_listbox.get(sel[0]).strip()
+        
+        data = self._load_wordlist_json()
+        mapping = data.get("phonetic_mapping", {})
+        
+        if alias_to_remove in mapping:
+            del mapping[alias_to_remove]
+            
+        data["phonetic_mapping"] = mapping
+        
+        self._save_wordlist_json(data)
+        self._detector.reload_wordlist()
+        self._refresh_aliases_display()
 
     def _reload_wordlist(self):
         self._detector.reload_wordlist()
-        self._refresh_wordlist_display()
-
-    def _refresh_wordlist_display(self):
-        if not self._wordlist_listbox: return
-        
-        data = self._load_wordlist_json()
-        toxic_words = data.get("toxic_words", [])
-        mapping = data.get("phonetic_mapping", {})
-        
-        # Sort words
-        toxic_words.sort()
-        
-        self._wordlist_listbox.delete(0, "end")
-        
-        for word in toxic_words:
-            # Find aliases (reverse lookup: keys where value == word)
-            aliases = [k for k, v in mapping.items() if v == word]
-            
-            display_text = f"  {word}"
-            if aliases:
-                display_text += f"  (alias: {', '.join(aliases)})"
-                
-            self._wordlist_listbox.insert("end", display_text)
-            
-        if self._wordcount_label:
-            count = len(toxic_words)
-            self._wordcount_label.configure(text=f"Total: {count} kata (+{len(mapping)} alias)")
+        self._refresh_words_display()
 
     def _load_wordlist_json(self) -> dict:
         """
@@ -534,122 +617,289 @@ class AdminDashboard:
     # ================================================================
 
     def _build_sanctions_tab(self, parent):
-        """Tab konfigurasi timer warning/lockdown dan pesan."""
+        """Tab konfigurasi sanction_list (config-driven)."""
 
-        # Scrollable frame
         scroll = ctk.CTkScrollableFrame(parent)
         scroll.pack(fill="both", expand=True)
 
-        # ── 1. Cycle Timers ──
-        ctk.CTkLabel(scroll, text="⏱️ Timer Konfigurasi (Per Cycle)", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        # ── Header ──
+        ctk.CTkLabel(
+            scroll, text="📜 Daftar Sanksi (Urutan Eksekusi)",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).pack(anchor="w", padx=10, pady=(10, 5))
 
-        self._timer_entries = {}
+        ctk.CTkLabel(
+            scroll,
+            text="Sanksi dieksekusi berurutan dari atas ke bawah. Item terakhir akan diulang jika level melebihi jumlah list.",
+            font=ctk.CTkFont(size=12), text_color="#aaaaaa", wraplength=800,
+        ).pack(anchor="w", padx=10, pady=(0, 10))
 
-        def add_cycle_row(cycle_name, key_prefix):
-            frame = ctk.CTkFrame(scroll)
-            frame.pack(fill="x", padx=10, pady=5)
-            
-            ctk.CTkLabel(frame, text=cycle_name, width=120, anchor="w", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=10)
-            
-            # Warning Delay
-            ctk.CTkLabel(frame, text="Warn Delay (s):").pack(side="left", padx=5)
-            w_entry = ctk.CTkEntry(frame, width=60)
-            w_entry.pack(side="left", padx=5)
-            self._timer_entries[f"{key_prefix}_WarningDelay"] = w_entry
+        # ── Sanction List Display ──
+        list_frame = ctk.CTkFrame(scroll)
+        list_frame.pack(fill="x", padx=10, pady=5)
 
-            # Lockdown Duration
-            ctk.CTkLabel(frame, text="Lockdown (s):").pack(side="left", padx=5)
-            l_entry = ctk.CTkEntry(frame, width=60)
-            l_entry.pack(side="left", padx=5)
-            self._timer_entries[f"{key_prefix}_LockdownDuration"] = l_entry
+        self._sanction_listbox = tk.Listbox(
+            list_frame,
+            font=("Consolas", 12),
+            bg="#2b2b2b", fg="#ffffff",
+            selectbackground="#1a73e8", selectforeground="#ffffff",
+            borderwidth=0, highlightthickness=0, activestyle="none",
+            exportselection=False,
+            height=10,
+        )
+        self._sanction_listbox.pack(fill="x", expand=True, padx=5, pady=5)
+        self._sanction_listbox.bind("<<ListboxSelect>>", self._on_sanction_select)
 
-        add_cycle_row("Cycle 1 (Viol 1-3)", "Cycle1")
-        add_cycle_row("Cycle 2 (Viol 4-6)", "Cycle2")
-        add_cycle_row("Cycle 3+ (Viol 7+)", "Cycle3")
+        # ── Edit Fields ──
+        edit_frame = ctk.CTkFrame(scroll)
+        edit_frame.pack(fill="x", padx=10, pady=5)
 
-        # ── 2. Custom Messages ──
-        ctk.CTkLabel(scroll, text="💬 Pesan Peringatan & Hukuman", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=10, pady=(20, 5))
+        ctk.CTkLabel(edit_frame, text="Type:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self._sanction_type_var = ctk.StringVar(value="WARNING")
+        ctk.CTkSegmentedButton(
+            edit_frame, values=["WARNING", "LOCKDOWN"],
+            variable=self._sanction_type_var,
+        ).grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
-        self._msg_entries = {}
+        ctk.CTkLabel(edit_frame, text="Warning Delay (s):", font=ctk.CTkFont(weight="bold")).grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self._sanction_delay_entry = ctk.CTkEntry(edit_frame, width=80)
+        self._sanction_delay_entry.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        self._sanction_delay_entry.insert(0, "5")
 
-        def add_msg_box(label, key, height=60):
-            ctk.CTkLabel(scroll, text=label).pack(anchor="w", padx=20, pady=(5,0))
-            box = ctk.CTkTextbox(scroll, height=height) if height > 30 else ctk.CTkEntry(scroll)
-            box.pack(fill="x", padx=20, pady=5)
-            self._msg_entries[key] = box
-        
-        add_msg_box("Pesan Warning Level 1:", "WarningMessageLevel1", 80)
-        add_msg_box("Pesan Warning Level 2:", "WarningMessageLevel2", 80)
-        add_msg_box("Judul Lockdown:", "LockdownTitle", 30)
-        add_msg_box("Pesan Lockdown:", "LockdownMessage", 60)
+        ctk.CTkLabel(edit_frame, text="Duration (s):", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self._sanction_duration_entry = ctk.CTkEntry(edit_frame, width=80)
+        self._sanction_duration_entry.grid(row=2, column=1, padx=10, pady=5, sticky="w")
+        self._sanction_duration_entry.insert(0, "60")
 
-        # ── Action Buttons ──
+        ctk.CTkLabel(edit_frame, text="Message:", font=ctk.CTkFont(weight="bold")).grid(row=3, column=0, padx=10, pady=5, sticky="nw")
+        self._sanction_msg_textbox = ctk.CTkTextbox(edit_frame, height=80, width=500)
+        self._sanction_msg_textbox.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+
+        # ── Buttons ──
         btn_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=10, pady=20)
+        btn_frame.pack(fill="x", padx=10, pady=10)
 
         ctk.CTkButton(
-            btn_frame, 
-            text="💾 Simpan Konfigurasi", 
+            btn_frame, text="➕ Tambah Sanksi",
             fg_color="#2e7d32", hover_color="#1b5e20",
-            command=self._save_sanctions_config
-        ).pack(side="left", expand=True, fill="x", padx=5)
+            command=self._add_sanction,
+        ).pack(side="left", expand=True, fill="x", padx=3)
 
         ctk.CTkButton(
-            btn_frame, 
-            text="🔄 Reload Default", 
-            fg_color="#455A64", hover_color="#37474F",
-            command=self._load_sanctions_config
-        ).pack(side="left", expand=True, fill="x", padx=5)
+            btn_frame, text="✏️ Update Terpilih",
+            fg_color="#1565C0", hover_color="#0D47A1",
+            command=self._update_sanction,
+        ).pack(side="left", expand=True, fill="x", padx=3)
 
-        # Initial Load
+        ctk.CTkButton(
+            btn_frame, text="🗑️ Hapus Terpilih",
+            fg_color="#c62828", hover_color="#b71c1c",
+            command=self._remove_sanction,
+        ).pack(side="left", expand=True, fill="x", padx=3)
+
+        ctk.CTkButton(
+            btn_frame, text="💾 Simpan ke Config",
+            fg_color="#FF6F00", hover_color="#E65100",
+            command=self._save_sanctions_config,
+        ).pack(side="left", expand=True, fill="x", padx=3)
+
+        # ── Penalty Reset Minutes ──
+        reset_frame = ctk.CTkFrame(scroll)
+        reset_frame.pack(fill="x", padx=10, pady=(10, 5))
+        ctk.CTkLabel(reset_frame, text="⏱️ Penalty Reset (menit):", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=10)
+        self._penalty_reset_entry = ctk.CTkEntry(reset_frame, width=80)
+        self._penalty_reset_entry.pack(side="left", padx=5)
+
+        # ── Load ──
+        self._sanctions_data = []
         self._load_sanctions_config()
 
     def _load_sanctions_config(self):
-        """Load values from AuthService config to UI."""
-        if not self._auth: return
-        
-        # Load Timers
-        for key, entry in self._timer_entries.items():
-            val = self._auth.get_config(key)
-            if val is not None:
-                entry.delete(0, "end")
-                entry.insert(0, str(val))
+        """Load sanction_list from config to UI."""
+        if not self._auth:
+            return
+        self._sanctions_data = self._auth.get_config("sanction_list", [])
+        if not isinstance(self._sanctions_data, list):
+            self._sanctions_data = []
+        self._refresh_sanction_listbox()
 
-        # Load Messages
-        for key, widget in self._msg_entries.items():
-            val = self._auth.get_config(key, "")
-            if isinstance(widget, ctk.CTkEntry):
-                widget.delete(0, "end")
-                widget.insert(0, val)
-            elif isinstance(widget, ctk.CTkTextbox):
-                widget.delete("1.0", "end")
-                widget.insert("1.0", val)
+        # Load penalty reset
+        reset_min = self._auth.get_config("PenaltyResetMinutes", 60)
+        self._penalty_reset_entry.delete(0, "end")
+        self._penalty_reset_entry.insert(0, str(reset_min))
 
-    def _save_sanctions_config(self):
-        """Save UI values to AuthService config."""
-        if not self._auth: return
+    def _refresh_sanction_listbox(self):
+        """Refresh listbox display from _sanctions_data."""
+        self._sanction_listbox.delete(0, "end")
+        for i, s in enumerate(self._sanctions_data):
+            stype = s.get("type", "WARNING")
+            icon = "🔒" if stype == "LOCKDOWN" else "⚠️"
+            msg_preview = s.get("message", "")[:50].replace("\n", " ")
+            delay = s.get("warning_delay", 0)
+            dur = s.get("duration", 0)
+            display = f"  {i+1}. {icon} {stype}  |  delay={delay}s  dur={dur}s  |  {msg_preview}"
+            self._sanction_listbox.insert("end", display)
 
+    def _on_sanction_select(self, event=None):
+        """Populate edit fields when a sanction is selected."""
+        sel = self._sanction_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx >= len(self._sanctions_data):
+            return
+        s = self._sanctions_data[idx]
+        self._sanction_type_var.set(s.get("type", "WARNING"))
+        self._sanction_delay_entry.delete(0, "end")
+        self._sanction_delay_entry.insert(0, str(s.get("warning_delay", 5)))
+        self._sanction_duration_entry.delete(0, "end")
+        self._sanction_duration_entry.insert(0, str(s.get("duration", 0)))
+        self._sanction_msg_textbox.delete("1.0", "end")
+        self._sanction_msg_textbox.insert("1.0", s.get("message", ""))
+
+    def _get_edit_fields(self) -> dict:
+        """Read current edit fields into a sanction dict."""
         try:
-            # Save Timers
-            for key, entry in self._timer_entries.items():
-                try:
-                    val = int(entry.get())
-                    self._auth.update_config(key, val)
-                except ValueError:
-                    continue # Skip invalid numbers
+            delay = int(self._sanction_delay_entry.get())
+        except ValueError:
+            delay = 5
+        try:
+            dur = int(self._sanction_duration_entry.get())
+        except ValueError:
+            dur = 0
+        return {
+            "type": self._sanction_type_var.get(),
+            "message": self._sanction_msg_textbox.get("1.0", "end-1c"),
+            "duration": dur,
+            "warning_delay": delay,
+        }
 
-            # Save Messages
-            for key, widget in self._msg_entries.items():
-                if isinstance(widget, ctk.CTkEntry):
-                    val = widget.get()
+    def _add_sanction(self):
+        """Add new sanction from edit fields."""
+        self._sanctions_data.append(self._get_edit_fields())
+        self._refresh_sanction_listbox()
+
+    def _update_sanction(self):
+        """Update selected sanction from edit fields."""
+        sel = self._sanction_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx >= len(self._sanctions_data):
+            return
+        self._sanctions_data[idx] = self._get_edit_fields()
+        self._refresh_sanction_listbox()
+
+    def _remove_sanction(self):
+        """Remove selected sanction."""
+        sel = self._sanction_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx < len(self._sanctions_data):
+            self._sanctions_data.pop(idx)
+        self._refresh_sanction_listbox()
+
+    def _reset_penalty_action(self):
+        """Bypass password and forcefully reset the violation count (Admin usage)."""
+        if self._penalty_mgr: 
+            self._penalty_mgr.reset()
+            messagebox.showinfo("Berhasil", "Riwayat pelanggaran seluruh pengguna telah dialihkan menjadi 0.")
+
+    # ================================================================
+    # AUTO-UPDATER
+    # ================================================================
+
+    def _check_update_action(self):
+        """Memeriksa API GitHub secara asinkronus untuk mencari rilis terbaru."""
+        import threading
+        from app.updater import GithubUpdater
+        from tkinter import messagebox
+
+        if not self._github_repo or self._github_repo == "USERNAME/REPO_NAME":
+            messagebox.showinfo("Informasi Update", "Repositori GitHub belum dikonfigurasi. Silakan ubah variabel GITHUB_REPO di 'main.py' terlebih dahulu.")
+            return
+
+        messagebox.showinfo("Memeriksa Pembaruan", "Sistem sedang memeriksa pembaruan di latar belakang.\nHarap tunggu sebentar...")
+
+        def _check():
+            updater = GithubUpdater(self._github_repo, self._app_version)
+            has_update, latest_version, zip_url, notes = updater.check_for_updates()
+
+            def _on_ui():
+                if has_update:
+                    ans = messagebox.askyesno(
+                        "Update Ditemukan!",
+                        f"GC Toxic Shield V{latest_version.replace('v', '')} tersedia!\n\nCatatan Rilis:\n{notes[:300]}...\n\nApakah Anda ingin mengunduh dan memasangnya sekarang?"
+                    )
+                    if ans:
+                        self._start_download_update(updater, zip_url)
                 else:
-                    val = widget.get("1.0", "end-1c") # Remove trailing newline
-                self._auth.update_config(key, val)
+                    if "Gagal" in notes:
+                        messagebox.showerror("Gagal Memeriksa", notes)
+                    else:
+                        messagebox.showinfo("Update Selesai", "Aplikasi Anda sudah versi yang paling terbaru!")
+
+            if self._root:
+                self._root.after(0, _on_ui)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _start_download_update(self, updater, zip_url):
+        """Membuka dialog progres bar asinkronus untuk proses pengunduhan ZIP."""
+        from tkinter import messagebox
+        
+        dl_win = ctk.CTkToplevel(self._root)
+        dl_win.title("Mengunduh Pembaruan...")
+        dl_win.geometry("400x120")
+        dl_win.resizable(False, False)
+        dl_win.attributes("-topmost", True)
+        
+        # Center the download window
+        dl_win.update_idletasks()
+        x = (self._root.winfo_screenwidth() // 2) - 200
+        y = (self._root.winfo_screenheight() // 2) - 60
+        dl_win.geometry(f"+{x}+{y}")
+        
+        lbl = ctk.CTkLabel(dl_win, text="Memulai koneksi ke server...", font=ctk.CTkFont(size=14))
+        lbl.pack(expand=True, padx=20, pady=20)
+        
+        # Modal
+        dl_win.focus_force()
+        dl_win.grab_set()
+
+        def _on_progress(msg):
+            lbl.configure(text=msg)
+
+        def _on_complete(msg):
+            lbl.configure(text=msg, text_color="#4CAF50")
+            dl_win.after(2500, lambda: dl_win.destroy())
+
+        def _on_error(msg):
+            lbl.configure(text=f"Error: {msg}", text_color="#FF5252")
+            messagebox.showerror("Update Gagal", f"Terdapat kesalahan saat mengunduh:\n{msg}")
+
+        updater.download_and_install_async(zip_url, on_progress=_on_progress, on_complete=_on_complete, on_error=_on_error)
+        
+    def _save_sanctions_config(self):
+        """Save sanction_list and PenaltyResetMinutes to config."""
+        if not self._auth:
+            return
+        try:
+            self._auth.update_config("sanction_list", self._sanctions_data)
+            try:
+                reset_min = int(self._penalty_reset_entry.get())
+                self._auth.update_config("PenaltyResetMinutes", reset_min)
+            except ValueError:
+                pass
+
+            # Reload penalty manager if available
+            if hasattr(self, '_penalty_mgr') and self._penalty_mgr:
+                self._penalty_mgr.reload_config()
 
             from tkinter import messagebox
-            messagebox.showinfo("Success", "Konfigurasi berhasil disimpan!")
-            logger.info("Sanctions config updated via UI")
-
+            messagebox.showinfo("Success", "Konfigurasi sanksi berhasil disimpan!")
+            logger.info("Sanction config saved via UI (%d items)", len(self._sanctions_data))
         except Exception as e:
             logger.error("Failed to save sanctions config: %s", e)
 
@@ -661,89 +911,111 @@ class AdminDashboard:
         """Tab Admin: Audio Control, Safety, Auto-Start."""
         from app.system_service import SystemService
 
-        # ── Audio Settings ──
-        audio_frame = ctk.CTkFrame(parent)
-        audio_frame.pack(fill="x", padx=10, pady=(10, 5))
+        # Gunakan scrollable frame agar responsif dan muat di layar kecil
+        scroll = ctk.CTkScrollableFrame(parent)
+        scroll.pack(fill="both", expand=True)
 
-        ctk.CTkLabel(
-            audio_frame,
-            text="🎙️ Audio Input Settings",
-            font=ctk.CTkFont(size=16, weight="bold"),
-        ).pack(anchor="w", padx=15, pady=(10, 5))
+        # Container utama dengan 2 kolom untuk merapikan layout
+        content_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        content_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        content_frame.grid_columnconfigure((0, 1), weight=1)
 
-        # Device Selection
+        # ── Kolom Kiri: Audio & System ──
+        left_col = ctk.CTkFrame(content_frame, fg_color="transparent")
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+        # 1. Audio Settings
+        audio_frame = ctk.CTkFrame(left_col)
+        audio_frame.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(audio_frame, text="🎙️ Audio Input", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=15, pady=(10, 5))
+        
         ctk.CTkLabel(audio_frame, text="Microphone Device:").pack(anchor="w", padx=15, pady=(5, 0))
-
-        self._device_dropdown = ctk.CTkComboBox(
-            audio_frame,
-            values=["Default"],
-            command=self._on_device_change,
-            width=300
-        )
+        self._device_dropdown = ctk.CTkComboBox(audio_frame, values=["Default"], command=self._on_device_change, width=300)
         self._device_dropdown.pack(anchor="w", padx=15, pady=5)
         self._populate_devices()
 
-        # Gain Slider
         ctk.CTkLabel(audio_frame, text="Digital Gain (Penguat Suara):").pack(anchor="w", padx=15, pady=(10, 0))
-
         slider_row = ctk.CTkFrame(audio_frame, fg_color="transparent")
         slider_row.pack(fill="x", padx=15, pady=5)
-
-        self._gain_slider = ctk.CTkSlider(
-            slider_row,
-            from_=0.0, to=5.0,
-            number_of_steps=50,
-            command=self._on_gain_change
-        )
+        self._gain_slider = ctk.CTkSlider(slider_row, from_=0.0, to=5.0, number_of_steps=50, command=self._on_gain_change)
         self._gain_slider.pack(side="left", fill="x", expand=True)
         self._gain_slider.set(1.0)
-
         self._gain_label = ctk.CTkLabel(slider_row, text="1.0x", width=40)
         self._gain_label.pack(side="right", padx=5)
 
-        # ── Password Settings ──
-        pwd_frame = ctk.CTkFrame(parent)
-        pwd_frame.pack(fill="x", padx=10, pady=5)
+        # 2. System Settings
+        system_frame = ctk.CTkFrame(left_col)
+        system_frame.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(system_frame, text="⚙️ Windows Integration", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=15, pady=(10, 5))
 
-        ctk.CTkLabel(
-            pwd_frame,
-            text="🔑 Pengaturan Password",
-            font=ctk.CTkFont(size=16, weight="bold"),
-        ).pack(anchor="w", padx=15, pady=(10, 5))
-
-        self._old_pwd_entry = ctk.CTkEntry(pwd_frame, placeholder_text="Password Saat Ini", show="*")
-        self._old_pwd_entry.pack(fill="x", padx=15, pady=5)
-
-        self._new_pwd_entry = ctk.CTkEntry(pwd_frame, placeholder_text="Password Baru", show="*")
-        self._new_pwd_entry.pack(fill="x", padx=15, pady=5)
-
-        ctk.CTkButton(
-            pwd_frame,
-            text="Ubah Password",
-            fg_color="#00BCD4", hover_color="#00ACC1", text_color="black", font=ctk.CTkFont(weight="bold"),
-            command=self._change_password_action
-        ).pack(anchor="w", padx=15, pady=10)
-
-        # ── Safety Exit (Existing) ──
-        safety_frame = ctk.CTkFrame(parent)
-        safety_frame.pack(fill="x", padx=10, pady=5)
-        # ... (rest same as before)
-        ctk.CTkLabel(safety_frame, text="🆘 Safety Exit", font=ctk.CTkFont(size=16, weight="bold"), text_color="#FF4444").pack(anchor="w", padx=15, pady=5)
-        ctk.CTkButton(safety_frame, text="Emergency Exit (Release Hooks)", fg_color="#B71C1C", hover_color="#D32F2F", command=self._emergency_exit).pack(fill="x", padx=15, pady=10)
-
-        # ── Auto-Start (Existing) ──
-        autostart_frame = ctk.CTkFrame(parent)
-        autostart_frame.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(autostart_frame, text="🔄 Auto-Start", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=15, pady=5)
+        # Auto-start
         is_enabled = SystemService.is_autostart_enabled()
         self._autostart_var = ctk.StringVar(value="on" if is_enabled else "off")
-        ctk.CTkSwitch(autostart_frame, text="Auto-start on Windows boot", variable=self._autostart_var, onvalue="on", offvalue="off", command=self._on_autostart_toggle).pack(anchor="w", padx=15, pady=10)
+        ctk.CTkSwitch(
+            system_frame, text="Auto-start saat Windows boot", variable=self._autostart_var, 
+            onvalue="on", offvalue="off", command=self._on_autostart_toggle
+        ).pack(anchor="w", padx=15, pady=(10, 5))
 
-        # ── Violation Reset (Existing) ──
-        violation_frame = ctk.CTkFrame(parent)
-        violation_frame.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(violation_frame, text="🔄 Reset Violations", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=15, pady=5)
-        ctk.CTkButton(violation_frame, text="Reset to 0", fg_color="#1565C0", hover_color="#1976D2", command=self._reset_violations).pack(fill="x", padx=15, pady=10)
+        # Settings Lock
+        self._settings_lock_var = ctk.StringVar(value="off")
+        ctk.CTkSwitch(
+            system_frame, text="Kunci Windows Settings & Control Panel", variable=self._settings_lock_var,
+            onvalue="on", offvalue="off", command=self._on_settings_lock_toggle
+        ).pack(anchor="w", padx=15, pady=(10, 5))
+
+        # Desktop Guard
+        self._desktop_guard_var = ctk.StringVar(value="off") # Secara default OFF pada first-run
+        self._guard_switch = ctk.CTkSwitch(
+            system_frame, text="Surgical Desktop Guard (Blokir Edit)", variable=self._desktop_guard_var,
+            onvalue="on", offvalue="off", command=self._on_desktop_guard_toggle
+        )
+        self._guard_switch.pack(anchor="w", padx=15, pady=(10, 15))
+
+        # Pembaruan Jaringan (Updater)
+        update_frame = ctk.CTkFrame(left_col)
+        update_frame.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(update_frame, text="🔄 Pembaruan Sistem", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(update_frame, text=f"Versi Saat Ini: v{self._app_version}").pack(anchor="w", padx=15, pady=(0, 5))
+        
+        ctk.CTkButton(
+            update_frame, text="Periksa Pembaruan", fg_color="#4CAF50", hover_color="#45a049", 
+            text_color="white", font=ctk.CTkFont(weight="bold"), command=self._check_update_action
+        ).pack(anchor="w", padx=15, pady=(5, 15))
+
+
+        # ── Kolom Kanan: Keamanan & Admin ──
+        right_col = ctk.CTkFrame(content_frame, fg_color="transparent")
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+
+        # 3. Mode Admin & Password
+        pwd_frame = ctk.CTkFrame(right_col)
+        pwd_frame.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(pwd_frame, text="🔑 Keamanan Dashboard", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=15, pady=(10, 5))
+        
+        self._old_pwd_entry = ctk.CTkEntry(pwd_frame, placeholder_text="Password Saat Ini", show="*")
+        self._old_pwd_entry.pack(fill="x", padx=15, pady=5)
+        self._new_pwd_entry = ctk.CTkEntry(pwd_frame, placeholder_text="Password Baru", show="*")
+        self._new_pwd_entry.pack(fill="x", padx=15, pady=5)
+        
+        ctk.CTkButton(
+            pwd_frame, text="Ubah Password", fg_color="#00BCD4", hover_color="#00ACC1", text_color="black", 
+            font=ctk.CTkFont(weight="bold"), command=self._change_password_action
+        ).pack(anchor="w", padx=15, pady=(10, 15))
+
+        # 4. Modul Admin / Reset
+        action_frame = ctk.CTkFrame(right_col)
+        action_frame.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(action_frame, text="🛠️ Modul Operasional", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=15, pady=(10, 5))
+
+        ctk.CTkButton(
+            action_frame, text="🔄 Reset Status Peringatan", fg_color="#1565C0", hover_color="#1976D2", 
+            command=self._reset_violations, height=35
+        ).pack(fill="x", padx=15, pady=(10, 5))
+
+        ctk.CTkButton(
+            action_frame, text="🆘 Emergency Exit (Matikan Aplikasi)", fg_color="#B71C1C", hover_color="#D32F2F", 
+            command=self._emergency_exit, height=35
+        ).pack(fill="x", padx=15, pady=(10, 15))
 
     # ── Audio Callbacks ──
 
@@ -781,8 +1053,8 @@ class AdminDashboard:
     def _emergency_exit(self):
         from app.system_service import SystemService
         logger.warning("🆘 EMERGENCY EXIT triggered UI")
-        if self._lockdown_mgr and hasattr(self._lockdown_mgr, '_overlay'):
-            if self._lockdown_mgr._overlay: self._lockdown_mgr._overlay.dismiss()
+        if self._penalty_mgr and hasattr(self._penalty_mgr, '_overlay'):
+            if self._penalty_mgr._overlay: self._penalty_mgr._overlay.dismiss()
         SystemService.emergency_release_hooks()
 
     def _on_autostart_toggle(self):
@@ -790,8 +1062,36 @@ class AdminDashboard:
         if self._autostart_var.get() == "on": SystemService.enable_autostart()
         else: SystemService.disable_autostart()
 
+    def _on_desktop_guard_toggle(self):
+        if not self._desktop_guard:
+            return
+        if self._desktop_guard_var.get() == "on":
+            self._desktop_guard.enable()
+        else:
+            self._desktop_guard.disable()
+
+    def _on_settings_lock_toggle(self):
+        from app.system_service import SystemService
+        from tkinter import messagebox
+        enable = self._settings_lock_var.get() == "on"
+        success = SystemService.toggle_windows_settings(enable)
+        if success:
+            state = "TERKUNCI" if enable else "TERBUKA"
+            messagebox.showinfo(
+                "Windows Settings",
+                f"Settings & Control Panel: {state}"
+            )
+        else:
+            messagebox.showerror(
+                "Error",
+                "Gagal mengubah pengaturan.\n"
+                "Pastikan aplikasi berjalan sebagai Administrator."
+            )
+            # Revert toggle
+            self._settings_lock_var.set("off" if enable else "on")
+
     def _reset_violations(self):
-        if self._lockdown_mgr: self._lockdown_mgr.reset()
+        if self._penalty_mgr: self._penalty_mgr.reset()
 
     def _change_password_action(self):
         if not self._auth: return

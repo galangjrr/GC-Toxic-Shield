@@ -73,6 +73,7 @@ def build():
         "--hidden-import", "ctypes",
         "--hidden-import", "requests",
         "--hidden-import", "pkg_resources.extern",
+        "--hidden-import", "watchdog",
 
         # App modules
         "--hidden-import", "app._paths",
@@ -80,6 +81,8 @@ def build():
         "--hidden-import", "app.detector",
         "--hidden-import", "app.logger_service",
         "--hidden-import", "app.overlay",
+        "--hidden-import", "app.penalty_manager",
+        "--hidden-import", "app.desktop_guard",
         "--hidden-import", "app.ui_manager",
         "--hidden-import", "app.system_service",
         "--hidden-import", "app.auth_service",

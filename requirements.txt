@@ -24,3 +24,6 @@ Pillow>=10.0.0
 
 # Build & Packaging
 pyinstaller>=6.0
+
+# Monitoring
+watchdog>=4.0.0

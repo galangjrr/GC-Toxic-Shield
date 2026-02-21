@@ -206,6 +206,83 @@ class WarningBox:
 
 
 # ================================================================
+# SIMPLE WARNING BOX (Surgical Desktop Guard)
+# ================================================================
+
+class SimpleWarningBox:
+    """
+    Jendela peringatan sederhana untuk Desktop Guard.
+    Tanpa timer, hanya tombol OK, dan tidak menutupi seluruh layar.
+    """
+    
+    _instance = None
+    
+    def __init__(self, root: tk.Tk):
+        # Prevent multiple popups at once
+        if SimpleWarningBox._instance is not None:
+            return
+            
+        SimpleWarningBox._instance = self
+        self._root = root
+        
+        self._win = ctk.CTkToplevel(root) if ctk else tk.Toplevel(root)
+        self._win.title("⚠️ Peringatan Sistem")
+        self._win.geometry("450x200")
+        self._win.resizable(False, False)
+        self._win.attributes("-topmost", True)
+        self._win.transient(root)
+        
+        # Center on screen
+        self._win.update_idletasks()
+        x = (self._win.winfo_screenwidth() // 2) - 225
+        y = (self._win.winfo_screenheight() // 2) - 100
+        self._win.geometry(f"+{x}+{y}")
+        
+        self._win.protocol("WM_DELETE_WINDOW", self._dismiss)
+        
+        content = ctk.CTkFrame(self._win, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(
+            content,
+            text="🚨 DILARANG 🚨",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color="#FF5252"
+        ).pack(pady=(0, 10))
+        
+        ctk.CTkLabel(
+            content,
+            text="Dilarang menambah, menghapus, atau mengubah nama file di Desktop.",
+            font=ctk.CTkFont(size=14),
+            justify="center",
+            wraplength=400
+        ).pack(pady=(0, 20))
+        
+        ctk.CTkButton(
+            content,
+            text="OK, Saya Mengerti",
+            font=ctk.CTkFont(weight="bold"),
+            width=200,
+            command=self._dismiss
+        ).pack()
+        
+        # Modal
+        self._win.grab_set()
+        self._win.focus_force()
+        logger.info("SimpleWarningBox shown for Desktop Guard")
+        
+    def _dismiss(self):
+        try:
+            self._win.grab_release()
+            self._win.destroy()
+        except Exception:
+            pass
+        finally:
+            SimpleWarningBox._instance = None
+            logger.info("SimpleWarningBox dismissed")
+
+
+# ================================================================
 # LOCKDOWN OVERLAY (Level 3 dalam siklus 3)
 # ================================================================
 
@@ -628,214 +705,3 @@ class LockdownOverlay:
         except Exception as e:
             logger.error("Failed to remove hook: %s", e)
 
-
-# ================================================================
-# LOCKDOWN MANAGER — Tiered 3-Level Cycle + Penalty Reset
-# ================================================================
-
-class LockdownManager:
-    """
-    Mengelola siklus peringatan 3-level:
-      Level 1-2: WarningBox
-      Level 3:   LockdownOverlay (1 menit)
-    Berulang setiap kelipatan 3.
-
-    IsPenaltyActive: jika penalty sedang berjalan, semua input toxic
-    diabaikan sampai selesai.
-
-    Penalty Reset: jika tidak ada deteksi selama PenaltyResetMinutes,
-    currentLevel reset ke 0.
-    """
-
-    def __init__(
-        self,
-        overlay: LockdownOverlay,
-        auth_service=None,
-        on_violation: Optional[Callable] = None,
-    ):
-        self._overlay = overlay
-        self._auth = auth_service
-        self._on_violation = on_violation
-        self._violation_count = 0
-        self._last_violation_time: float = 0.0
-        self._lock = threading.Lock()
-
-        # ── IsPenaltyActive flag ──
-        self._is_penalty_active = False
-
-        # Penalty reset timer
-        self._reset_timer: Optional[threading.Timer] = None
-        self._penalty_reset_minutes = 60
-        if auth_service:
-            self._penalty_reset_minutes = auth_service.get_config("PenaltyResetMinutes", 60)
-
-    @property
-    def violation_count(self) -> int:
-        return self._violation_count
-
-    @property
-    def current_level(self) -> int:
-        return self._violation_count
-
-    @property
-    def is_penalty_active(self) -> bool:
-        """True saat Warning/Lockdown sedang ditampilkan."""
-        return self._is_penalty_active
-
-    def trigger_violation(self, matched_words: list = None):
-        """
-        Dipanggil saat kata toxic terdeteksi.
-        Jika penalty sedang aktif → DIABAIKAN.
-
-        Progressive escalation per cycle:
-          Cycle 1 (viol 1-3): Warning 5s,  Lockdown 1 min
-          Cycle 2 (viol 4-6): Warning 15s, Lockdown 3 min
-          Cycle 3+ (viol 7+): Warning 30s, Lockdown 5 min
-        """
-        # ── Block if penalty is active ──
-        if self._is_penalty_active:
-            logger.info(
-                "⏸ Violation ignored — penalty is currently active"
-            )
-            return
-
-        with self._lock:
-            self._violation_count += 1
-            level = self._violation_count
-            self._last_violation_time = time.time()
-
-        # Mark penalty as active
-        self._is_penalty_active = True
-
-        # Cancel & restart penalty reset timer
-        self._restart_penalty_timer()
-
-        # ── Progressive escalation ──
-        cycle_num = ((level - 1) // 3) + 1  # 1-3→1, 4-6→2, 7-9→3...
-        cycle_pos = level % 3               # 1→1, 2→2, 3→0
-
-        warning_delay, lockdown_duration = self._get_cycle_params(cycle_num)
-
-        if cycle_pos == 0:
-            # Kelipatan 3 → Lockdown
-            action_type = "LOCKDOWN"
-            logger.warning(
-                "🔒 Violation #%d → LOCKDOWN (cycle %d, 3/3, duration: %ds)",
-                level, cycle_num, lockdown_duration
-            )
-        else:
-            # Level 1 atau 2 → Warning
-            action_type = "WARNING"
-            logger.warning(
-                "⚠ Violation #%d → WARNING (cycle %d, %d/3, delay: %ds)",
-                level, cycle_num, cycle_pos, warning_delay
-            )
-
-            # Determine message key
-            msg_key = "WarningMessageLevel2" if cycle_pos == 2 else "WarningMessageLevel1"
-            custom_msg = self._auth.get_config(msg_key, None)
-
-        # Callback
-        if self._on_violation:
-            try:
-                self._on_violation(level, self._violation_count, matched_words)
-            except Exception as e:
-                logger.error("Violation callback error: %s", e)
-
-        # Dispatch to main thread
-        try:
-            if action_type == "LOCKDOWN":
-                self._overlay._root.after(
-                    0,
-                    lambda: self._overlay.show(
-                        level, matched_words, lockdown_duration,
-                        on_dismiss=self._on_penalty_done,
-                        on_unlock=self.reset
-                    )
-                )
-            else:
-                self._overlay._root.after(
-                    0,
-                    lambda: WarningBox(
-                        root=self._overlay._root,
-                        level=level,
-                        matched_words=matched_words or [],
-                        auth_service=self._auth,
-                        warning_delay=warning_delay,
-                        message=custom_msg,
-                        on_dismiss=self._on_penalty_done,
-                    )
-                )
-        except Exception as e:
-            logger.error("Failed to show overlay/warning: %s", e)
-            self._is_penalty_active = False  # Reset on error
-
-    def _get_cycle_params(self, cycle_num: int) -> tuple:
-        """
-        Return (warning_delay, lockdown_duration) berdasarkan nomor siklus.
-        Mengambil nilai dari config (auth_service) jika ada.
-        """
-        # Default fallback values
-        w_delay = 5
-        l_duration = 60
-
-        if cycle_num <= 1:
-            w_delay = self._auth.get_config("Cycle1_WarningDelay", 5)
-            l_duration = self._auth.get_config("Cycle1_LockdownDuration", 60)
-        elif cycle_num == 2:
-            w_delay = self._auth.get_config("Cycle2_WarningDelay", 15)
-            l_duration = self._auth.get_config("Cycle2_LockdownDuration", 180)
-        else:
-            w_delay = self._auth.get_config("Cycle3_WarningDelay", 30)
-            l_duration = self._auth.get_config("Cycle3_LockdownDuration", 300)
-
-        return (w_delay, l_duration)
-
-    def _on_penalty_done(self):
-        """Called when WarningBox/LockdownOverlay is dismissed."""
-        self._is_penalty_active = False
-        logger.info("✓ Penalty completed — accepting new violations")
-
-    def reset(self):
-        """Reset violation count ke 0 (admin action atau penalty reset)."""
-        with self._lock:
-            old = self._violation_count
-            self._violation_count = 0
-        self._is_penalty_active = False
-        if self._reset_timer:
-            self._reset_timer.cancel()
-            self._reset_timer = None
-        logger.info("⟳ Violations reset: %d → 0", old)
-
-    def _restart_penalty_timer(self):
-        """Restart timer penalty reset."""
-        if self._reset_timer:
-            self._reset_timer.cancel()
-
-        reset_seconds = self._penalty_reset_minutes * 60
-        self._reset_timer = threading.Timer(
-            reset_seconds, self._penalty_reset_callback
-        )
-        self._reset_timer.daemon = True
-        self._reset_timer.start()
-
-        logger.info(
-            "Penalty reset timer set: %d minutes",
-            self._penalty_reset_minutes
-        )
-
-    def _penalty_reset_callback(self):
-        """Called when penalty reset timer expires."""
-        with self._lock:
-            elapsed = time.time() - self._last_violation_time
-            required = self._penalty_reset_minutes * 60
-
-            if elapsed >= required:
-                old = self._violation_count
-                self._violation_count = 0
-                logger.info(
-                    "⟳ Penalty auto-reset: %d → 0 (no violations for %d min)",
-                    old, self._penalty_reset_minutes
-                )
-            else:
-                logger.info("Penalty reset skipped — recent violation detected")

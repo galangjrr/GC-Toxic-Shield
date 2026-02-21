@@ -95,38 +95,112 @@ class AuthService:
 
         # ── Lockdown / Warning Defaults ──
         defaults = {
-            "WarningDelaySeconds": 5,
             "PenaltyResetMinutes": 60,
-            "LockdownDurationSeconds": 60,
             "LockdownTitle": "AREA TERKUNCI",
             "LockdownMessage": "Anda melanggar aturan berbahasa di GC Net.",
-
-            # ── Timers (Customizable) ──
-            "Cycle1_WarningDelay": 5,      # Detik
-            "Cycle1_LockdownDuration": 60, # Detik (1 menit)
-
-            "Cycle2_WarningDelay": 15,     # Detik
-            "Cycle2_LockdownDuration": 180,# Detik (3 menit)
-
-            "Cycle3_WarningDelay": 30,     # Detik
-            "Cycle3_LockdownDuration": 300,# Detik (5 menit)
-
-            # ── Customizable Messages ──
-            "WarningMessageLevel1": (
-                "⚠️ Peringatan Pertama\n\n"
-                "Sistem mendeteksi penggunaan kata-kata yang tidak pantas.\n"
-                "Mohon jaga tutur kata Anda."
-            ),
-            "WarningMessageLevel2": (
-                "⚠️ Peringatan Kedua\n\n"
-                "Anda KEMBALI menggunakan bahasa yang tidak sopan.\n"
-                "Ini adalah peringatan terakhir sebelum lockdown."
-            ),
+            "sanction_list": [
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Pertama\n\nSistem mendeteksi penggunaan kata-kata yang tidak pantas.\nMohon jaga tutur kata Anda.",
+                    "duration": 0,
+                    "warning_delay": 5,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Kedua\n\nAnda KEMBALI menggunakan bahasa yang tidak sopan.\nIni adalah peringatan terakhir sebelum lockdown.",
+                    "duration": 0,
+                    "warning_delay": 15,
+                },
+                {
+                    "type": "LOCKDOWN",
+                    "message": "Anda melanggar aturan berbahasa di GC Net.",
+                    "duration": 60,
+                    "warning_delay": 0,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Lanjutan\n\nAnda sudah melewati satu siklus hukuman.\nPelanggaran berikutnya akan mendapat sanksi lebih berat.",
+                    "duration": 0,
+                    "warning_delay": 15,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Serius\n\nPelanggaran berulang terdeteksi.\nLockdown berikutnya akan lebih lama.",
+                    "duration": 0,
+                    "warning_delay": 30,
+                },
+                {
+                    "type": "LOCKDOWN",
+                    "message": "Pelanggaran berulang. Akses dikunci 3 Menit.",
+                    "duration": 180,
+                    "warning_delay": 0,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Kritis Ke-1\n\nSegera hentikan kebiasaan buruk Anda.\nSanksi 5 Menit menanti.",
+                    "duration": 0,
+                    "warning_delay": 30,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Kritis Ke-2\n\nIni adalah peringatan terakhir sebelum 5 Menit.",
+                    "duration": 0,
+                    "warning_delay": 45,
+                },
+                {
+                    "type": "LOCKDOWN",
+                    "message": "Pelanggaran berat. Akses dikunci 5 Menit.",
+                    "duration": 300,
+                    "warning_delay": 0,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Ekstrim Ke-1\n\nApakah Anda masih bertindak kasar?\nSanksi 10 Menit menanti.",
+                    "duration": 0,
+                    "warning_delay": 45,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Ekstrim Ke-2\n\nSatu kata lagi dan PC ini terkunci 10 Menit.",
+                    "duration": 0,
+                    "warning_delay": 60,
+                },
+                {
+                    "type": "LOCKDOWN",
+                    "message": "Pelanggaran sangat berat. Akses dikunci 10 Menit.",
+                    "duration": 600,
+                    "warning_delay": 0,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Final Ke-1\n\nAnda telah mencapai batas toleransi.\nSanksi Maksimal 20 Menit menanti.",
+                    "duration": 0,
+                    "warning_delay": 60,
+                },
+                {
+                    "type": "WARNING",
+                    "message": "⚠️ Peringatan Final Ke-2\n\nSIAP-SIAP LOCKDOWN MAKSIMAL.",
+                    "duration": 0,
+                    "warning_delay": 60,
+                },
+                {
+                    "type": "LOCKDOWN",
+                    "message": "PELANGGARAN MAKSIMAL. Akses dikunci 20 Menit.",
+                    "duration": 1200,
+                    "warning_delay": 0,
+                },
+            ],
         }
         for key, value in defaults.items():
             if key not in self._config:
                 self._config[key] = value
                 changed = True
+                
+        # Auto-migrate old default (7 items) to new default (15 items)
+        if "sanction_list" in self._config and len(self._config["sanction_list"]) == 7:
+            logger.info("Auto-migrating legacy 7-step sanction list to 15-step")
+            self._config["sanction_list"] = defaults["sanction_list"]
+            changed = True
 
         if changed:
             self._save_config()

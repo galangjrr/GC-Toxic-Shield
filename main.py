@@ -41,6 +41,7 @@ logger = logging.getLogger("GCToxicShield")
 APP_NAME = "GC Toxic Shield"
 APP_VERSION = "2.1.0"
 BRAND = "GC Net Security Suite"
+GITHUB_REPO = "galangjrr/GC-Toxic-Shield"  # <-- Admin warns to replace this
 
 
 def show_messagebox(title: str, message: str, icon_type: int = 0x10):
@@ -178,7 +179,9 @@ def main():
             from app.audio_engine import AudioEngine
             from app.detector import ToxicDetector
             from app.logger_service import LoggerService
-            from app.overlay import LockdownOverlay, LockdownManager
+            from app.overlay import LockdownOverlay
+            from app.penalty_manager import PenaltyManager
+            from app.desktop_guard import DesktopGuard
             from app.ui_manager import AdminDashboard
             from app.system_service import SystemService
             from app.auth_service import AuthService
@@ -198,33 +201,41 @@ def main():
             logger_service=logger_svc,
             detector=detector,
             auth_service=auth_service,
+            app_version=APP_VERSION,
+            github_repo=GITHUB_REPO,
         )
         root = dashboard.build()
         
-        # --- Init Overlay ---
+        # --- Init Overlay & Penalty Manager ---
         overlay = LockdownOverlay(root, auth_service=auth_service)
 
         def on_violation(level, count, matched_words):
             logger.warning("⚠ VIOLATION #%d → Level %d", count, level)
 
-        lockdown_mgr = LockdownManager(
+        penalty_mgr = PenaltyManager(
             overlay=overlay,
             auth_service=auth_service,
             on_violation=on_violation,
         )
-        dashboard._lockdown_mgr = lockdown_mgr
+        dashboard._penalty_mgr = penalty_mgr
+
+        # --- Init Desktop Guard ---
+        desktop_guard = DesktopGuard(root=root)
+        dashboard._desktop_guard = desktop_guard
+        # Feature starts disabled by default upon first install. 
+        # Admin can turn it on from the Dashboard UI.
 
         # --- Init Audio Engine ---
         def on_transcription(text: str):
-            # T5: Prevent overlap — if penalty active, ignore all input
-            if lockdown_mgr.is_penalty_active:
+            # State Machine: if penalty active, ignore all input
+            if penalty_mgr.is_penalty_active:
                 logger.debug("Ignored input while penalty active: %s", text)
                 return
 
             result = detector.detect(text)
             logger_svc.log(text, result.is_toxic, result.matched_words)
             if result.is_toxic:
-                lockdown_mgr.trigger_violation(result.matched_words)
+                penalty_mgr.execute_sanction(result.matched_words)
 
         engine = AudioEngine(language="id-ID", on_transcription=on_transcription)
         dashboard._engine = engine
@@ -274,6 +285,11 @@ def main():
                 root.after(0, root.quit)
             def _on_exit_cancel():
                 logger.info("Exit cancelled by user")
+            def force_shutdown_hook():
+                logger.info("Main shutdown hook triggered...")
+                if desktop_guard:
+                    desktop_guard.cleanup()
+                SystemService.force_shutdown(engine, logger_svc, overlay)
             show_login_dialog(
                 on_success=_on_exit_success,
                 exit_mode=True,
@@ -308,18 +324,14 @@ def main():
 
         root.protocol("WM_DELETE_WINDOW", withdraw_window)
 
+        # ── Silent Startup: Always start in Tray (no login dialog) ──
+        # Auth is triggered only when user clicks "Show Dashboard" or "Exit"
         start_hidden = "--background" in sys.argv
         if start_hidden:
             logger.info("Starting in BACKGROUND mode (Tray only)")
-            withdraw_window()
         else:
-            logger.info("Starting in FOREGROUND mode")
-            # Show login dialog at startup
-            root.withdraw()  # Hide root first
-            def _on_startup_login():
-                root.deiconify()
-                logger.info("Dashboard visible after startup login")
-            show_login_dialog(on_success=_on_startup_login)
+            logger.info("Starting in FOREGROUND mode (Silent — Tray only)")
+        withdraw_window()
 
         # Run Tray in Thread
         threading.Thread(target=tray_icon.run, daemon=True).start()

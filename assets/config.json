@@ -13,5 +13,49 @@
     "Cycle3_WarningDelay": 30,
     "Cycle3_LockdownDuration": 300,
     "WarningMessageLevel1": "⚠️ Peringatan Pertama\n\nSistem mendeteksi penggunaan kata-kata yang tidak pantas.\nMohon jaga tutur kata Anda.",
-    "WarningMessageLevel2": "⚠️ Peringatan Kedua\n\nAnda KEMBALI menggunakan bahasa yang tidak sopan.\nIni adalah peringatan terakhir sebelum lockdown."
+    "WarningMessageLevel2": "⚠️ Peringatan Kedua\n\nAnda KEMBALI menggunakan bahasa yang tidak sopan.\nIni adalah peringatan terakhir sebelum lockdown.",
+    "sanction_list": [
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Pertama\n\nSistem mendeteksi penggunaan kata-kata yang tidak pantas.\nMohon jaga tutur kata Anda.",
+            "duration": 0,
+            "warning_delay": 5
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Kedua\n\nAnda KEMBALI menggunakan bahasa yang tidak sopan.\nIni adalah peringatan terakhir sebelum lockdown.",
+            "duration": 0,
+            "warning_delay": 15
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Anda melanggar aturan berbahasa di GC Net.",
+            "duration": 60,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Lanjutan\n\nAnda sudah melewati satu siklus hukuman.\nPelanggaran berikutnya akan mendapat sanksi lebih berat.",
+            "duration": 0,
+            "warning_delay": 15
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Serius\n\nPelanggaran berulang terdeteksi.\nLockdown berikutnya akan lebih lama.",
+            "duration": 0,
+            "warning_delay": 30
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Pelanggaran berulang. Akses dikunci lebih lama.",
+            "duration": 180,
+            "warning_delay": 0
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Pelanggaran berat. Ini adalah sanksi maksimum.",
+            "duration": 300,
+            "warning_delay": 0
+        }
+    ]
 }
