@@ -39,7 +39,7 @@ logger = logging.getLogger("GCToxicShield")
 
 # ── Constants ────────────────────────────────────────────────
 APP_NAME = "GC Toxic Shield"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 BRAND = "GC Net Security Suite"
 GITHUB_REPO = "galangjrr/GC-Toxic-Shield"  # <-- Admin warns to replace this
 

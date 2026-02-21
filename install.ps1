@@ -80,8 +80,20 @@ Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZipPath
 
 # 6. Ekstrak Berkas Zip
 Write-Host "=> Mengekstrak file ke $installDir..."
-# Force Expand-Archive untuk menimpa file app/-internal yang ada (kecuali log jika ditimpa bersih harus di-zip dg struktur benar)
-Expand-Archive -Path $tempZipPath -DestinationPath $installDir -Force
+$tempExt = Join-Path $env:TEMP 'GCT_Install_Ext'
+if (Test-Path $tempExt) { Remove-Item -Recurse -Force $tempExt }
+Expand-Archive -Path $tempZipPath -DestinationPath $tempExt -Force
+
+# Cari exe untuk mengetahui di mana persisnya letak root folder dari aplikasi di dalam zip
+$exePath = Get-ChildItem -Path $tempExt -Filter $exeName -Recurse | Select-Object -First 1
+if (-not $exePath) {
+    throw "Gagal menemukan '$exeName' di dalam file unduhan zip."
+}
+
+$sourceDir = $exePath.Directory.FullName
+Copy-Item -Path "$sourceDir\*" -Destination $installDir -Recurse -Force
+
+Remove-Item -Recurse -Force $tempExt
 Remove-Item $tempZipPath -Force
 
 # 7. Membuat Shortcut di Desktop

@@ -137,16 +137,16 @@ class GithubUpdater:
         bat_path = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "gctoxic_update.bat")
         
         # Script bat:
-        # PING sbg sleep 4 dtk -> KILL exe lama -> PowerShell ekstrak ZIP -> START exe baru -> DELETE ZIP & script
+        # PING sbg sleep 4 dtk -> KILL exe lama -> PowerShell ekstrak ZIP -> Cek stuktur folder zip -> Copy -> START
         bat_content = f"""@echo off
 echo Mengkonfigurasi pembaruan GC Toxic Shield...
-echo JANGAN TUTUP JENDELA INI. Aplikasi akan terbuka otomatis setelah instalasi selesai.
+echo JANGAN TUTUP JENDELA INI. Aplikasi akan otomatis terbuka.
 ping 127.0.0.1 -n 4 > nul
 taskkill /F /IM "{exe_name}" /T > nul 2>&1
 ping 127.0.0.1 -n 2 > nul
 
 echo Mengekstrak rancangan terbaru...
-powershell -WindowStyle Hidden -NoProfile -Command "Expand-Archive -Path '{zip_path}' -DestinationPath '{app_dir}' -Force"
+powershell -WindowStyle Hidden -NoProfile -Command "$tempExt = Join-Path $env:TEMP 'GCT_Update_Ext'; if (Test-Path $tempExt) {{ Remove-Item -Recurse -Force $tempExt }}; Expand-Archive -Path '{zip_path}' -DestinationPath $tempExt -Force; $exePath = Get-ChildItem -Path $tempExt -Filter '{exe_name}' -Recurse | Select-Object -First 1; if ($exePath) {{ $sourceDir = $exePath.Directory.FullName; Copy-Item -Path \\"$sourceDir\\*\\" -Destination '{app_dir}' -Recurse -Force }}; if (Test-Path $tempExt) {{ Remove-Item -Recurse -Force $tempExt }}"
 
 echo Memulai ulang aplikasi GC Toxic Shield...
 start "" "{os.path.join(app_dir, exe_name)}"
