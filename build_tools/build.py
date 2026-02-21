@@ -8,10 +8,10 @@
 # Usage:
 #   python build_tools/build.py
 #
-# Output:
-#   dist/GCToxicShield/
-#   ├── GCToxicShield.exe    (executable + admin manifest)
-#   ├── assets/              (word_list.json)
+# Expected output:
+#   dist/GC Toxic Shield/
+#   ├── GC Toxic Shield.exe    (executable + admin manifest)
+#   ├── _internal/        (libraries)      (word_list.json)
 #   └── logs/                (auto-created)
 # =============================================================
 
@@ -23,7 +23,7 @@ import shutil
 # ── Paths ──
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD_TOOLS = os.path.join(PROJECT_ROOT, "build_tools")
-DIST_DIR = os.path.join(PROJECT_ROOT, "dist", "GCToxicShield")
+DIST_DIR = os.path.join(PROJECT_ROOT, "dist", "GC Toxic Shield")
 MANIFEST_PATH = os.path.join(BUILD_TOOLS, "gc_toxic_shield.manifest")
 MAIN_PY = os.path.join(PROJECT_ROOT, "main.py")
 
@@ -49,7 +49,7 @@ def build():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
-        "--name", "GCToxicShield",
+        "--name", "GC Toxic Shield",
         "--onedir",                # Startup lebih cepat di PC klien
         "--windowed",              # Produksi: sembunyikan terminal agar lebih aman dari heuristik AV
         "--manifest", MANIFEST_PATH,  # UAC admin prompt → keyboard hook stabil
@@ -198,7 +198,7 @@ def build():
     print(f"  Output: {DIST_DIR}")
     print()
     print("  Isi distribusi:")
-    print("    GCToxicShield.exe  ← Jalankan (auto UAC prompt)")
+    print("    GC Toxic Shield.exe  ← Jalankan (auto UAC prompt)")
     print("    _internal/         ← Runtime + DLLs")
     print("    assets/            ← word_list.json")
     print("    logs/              ← CSV output")
@@ -207,9 +207,9 @@ def build():
     print("    Engine sekarang menggunakan Google Speech (online).")
     print()
     print("  Deploy:")
-    print("    1. Copy dist/GCToxicShield/ ke target PC")
+    print("    1. Copy dist/GC Toxic Shield/ ke target PC")
     print("    2. Pastikan internet aktif")
-    print("    3. Jalankan GCToxicShield.exe")
+    print("    3. Jalankan GC Toxic Shield.exe")
     print("━" * 60 + "\n")
 
 

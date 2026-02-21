@@ -16,7 +16,7 @@ from typing import Optional
 logger = logging.getLogger("GCToxicShield.System")
 
 # ── Constants ──────────────────────────────────────────────────
-APP_NAME = "GCToxicShield"
+APP_NAME = "GC Toxic Shield"
 REGISTRY_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 

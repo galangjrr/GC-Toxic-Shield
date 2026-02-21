@@ -15,7 +15,7 @@ $githubRepo = "galangjrr/GC-Toxic-Shield"
 # =================================================================
 
 $installDir = "C:\GC Net\GC Toxic Shield"
-$exeName = "GCToxicShield.exe"
+$exeName = "GC Toxic Shield.exe"
 $releaseApiUrl = "https://api.github.com/repos/$githubRepo/releases/latest"
 
 Write-Host "==========================================" -ForegroundColor Cyan
@@ -58,14 +58,15 @@ try {
     if (-not $downloadUrl) {
         throw "File berekstensi .zip tidak ditemukan di daftar Assets Release ini."
     }
-} catch {
+}
+catch {
     Write-Error "GAGAL mengakses GitHub API. Pastikan nama repository benar dan publik."
     Write-Error $_.Exception.Message
     Exit
 }
 
 # 5. Mulai Mengunduh
-$tempZipPath = Join-Path $env:TEMP "GCToxicShield_Install.zip"
+$tempZipPath = Join-Path $env:TEMP "GC_Toxic_Shield_Install.zip"
 Write-Host "=> Mengunduh file dari GitHub..."
 Write-Host "- URL: $downloadUrl"
 Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZipPath

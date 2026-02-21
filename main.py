@@ -80,7 +80,7 @@ def enforce_singleton():
     """
     Memastikan hanya satu instance aplikasi yang berjalan.
     """
-    mutex_name = "Global\\GCToxicShield_Mutex_v2"
+    mutex_name = "Global\\GC_Toxic_Shield_Mutex_v2"
     mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
     last_error = ctypes.windll.kernel32.GetLastError()
     

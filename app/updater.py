@@ -77,7 +77,7 @@ class GithubUpdater:
         def _worker():
             try:
                 temp_dir = os.environ.get("TEMP", "C:\\Temp")
-                zip_path = os.path.join(temp_dir, "GCToxicShield_Update.zip")
+                zip_path = os.path.join(temp_dir, "GC_Toxic_Shield_Update.zip")
                 
                 # 1. Download File
                 if on_progress: on_progress("Mengunduh pembaruan dari GitHub...")
@@ -117,7 +117,7 @@ class GithubUpdater:
     def _spawn_update_script(self, zip_path: str):
         """
         Membuat dan mengeksekusi script Batch lepas kendali yang akan membumi-hanguskan
-        proses GCToxicShield saat ini, mengekstrak rilis terbaru, dan menyalakannya lagi.
+        proses GC Toxic Shield saat ini, mengekstrak rilis terbaru, dan menyalakannya lagi.
         """
         app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         # Koreksi path jika jalan di dev Python (bukan dicompile)
@@ -126,7 +126,7 @@ class GithubUpdater:
             
         exe_name = os.path.basename(sys.argv[0])
         if not exe_name.endswith(".exe"):
-            exe_name = "GCToxicShield.exe"
+            exe_name = "GC Toxic Shield.exe"
             
         bat_path = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "gctoxic_update.bat")
         
