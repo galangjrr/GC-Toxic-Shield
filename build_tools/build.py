@@ -162,7 +162,7 @@ def build():
     cleanup_count = 0
     for root, dirs, files in os.walk(DIST_DIR):
         for name in files:
-            if name in bloat_files or name.startswith("libscipy") or name.startswith("mfc140"):
+            if name in bloat_files or name.startswith("mfc140"):
                 try:
                     os.remove(os.path.join(root, name))
                     print(f"    - Removed: {name}")
