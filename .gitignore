@@ -25,3 +25,7 @@ logs/
 # Installer / other binaries
 *.exe
 *.dll
+
+# Documentation / Internal Notes
+*PRD*.txt
+*.txt
