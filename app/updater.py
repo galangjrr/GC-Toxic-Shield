@@ -4,6 +4,7 @@ import json
 import time
 import zipfile
 import urllib.request
+import urllib.error
 import threading
 import subprocess
 import logging
@@ -62,6 +63,11 @@ class GithubUpdater:
                     
             return False, latest_version, "", ""
                 
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False, "", "", "Versi terbaru tidak ditemukan. Mungkin Anda belum pernah membuat 'Release' (Rilis) publik sama sekali di GitHub Anda."
+            logger.error("HTTP Error saat mengecek update: %s", e)
+            return False, "", "", f"Gagal terhubung ke GitHub: HTTP {e.code}"
         except Exception as e:
             logger.error("Gagal mengecek update: %s", e)
             return False, "", "", f"Gagal mengecek update: {e}"

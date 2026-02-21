@@ -1,6 +1,6 @@
 # 🛡️ GC Toxic Shield
 **Brand:** GC Net Security Suite  
-**Version:** 2.1.0 (Google Speech Edition)  
+**Version:** 1.0 (Google Speech Edition)  
 **Target OS:** Windows 10/11 x64  
 **Hardware Profile:** Optimized for maximum CPU efficiency (Integrated Graphics friendly)
 
@@ -15,7 +15,7 @@
 
 Jika pelanggaran terdeteksi, sistem akan mengaktifkan mekanisme peringatan visual agresif atau mengunci layar (Lockdown Overlay) untuk menegakkan disiplin bermain secara preventif, memastikan lingkungan warnet tetap nyaman dan ramah.
 
-### 🚀 Apa yang baru di Edisi 2.1.0?
+### 🚀 Apa yang baru di Edisi 1.0?
 *GC Toxic Shield* kini telah sepenuhnya bertransisi ke **Cloud-Based Online Engine (Google Speech Recognition)**.
 - **⚡ Ultra-ringan:** Ukuran aplikasi dipangkas drastis dari `~500MB` menjadi `~65MB`.
 - **💻 Performa Maksimal:** Beban statis memori dan CPU ditekan, tidak mengganggu *Frame Rate (FPS)* PC *client*.
