@@ -171,11 +171,23 @@ class WarningBox:
     def _show_password_prompt(self):
         """Show password dialog to force-close warning."""
         from app.login_dialog import LoginDialog
+
+        # T13 Bugfix: Turunkan z-index warningbox sejenak agar dialog auth bisa muncul di depannya
+        self._win.attributes("-topmost", False)
+
+        def _on_cancel():
+            # Kembalikan state topmost jika user batal login
+            try:
+                self._win.attributes("-topmost", True)
+                self._win.focus_force()
+            except Exception:
+                pass
+
         LoginDialog(
             parent=self._root,
             auth_service=self._auth,
             on_success=self._force_dismiss,
-            on_cancel=None,
+            on_cancel=_on_cancel,
             exit_mode=True,
         )
 
