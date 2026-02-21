@@ -36,6 +36,10 @@ class DesktopEventHandler(FileSystemEventHandler):
 
     def on_created(self, event):
         def _delete():
+            # Abaikan penghapusan otomatis untuk file shortcut system/game launcher dan dekstop.ini
+            if str(event.src_path).lower().endswith(('.lnk', '.ini', '.tmp')):
+                return
+                
             # Beri sedikit jeda agar proses copy/create Windows selesai
             time.sleep(0.5)
             try:
@@ -127,13 +131,15 @@ class DesktopGuard:
                 if lock:
                     # *S-1-1-0 is Everyone
                     # (OI)(CI)(IO) = Object Inherit, Container Inherit, Inherit Only
-                    # Deny ONLY: Delete (D), Delete Subfolders and Files (DC), Write Extended Attributes (WEA)
-                    # Do NOT deny WD because it breaks Explorer refresh icons.
+                    # Deny ONLY: Delete (D), Delete Subfolders and Files (DC)
+                    # Do NOT deny WD or WEA because it breaks Explorer refresh icons.
                     # MUST use (IO) so the rule applies to the folder's contents, not the Desktop folder itself.
-                    cmd = f'icacls "{path}" /deny *S-1-1-0:(OI)(CI)(IO)(D,DC,WEA) /T /C /Q'
+                    # TIDAK MENGGUNAKAN /T PADA COMMAND DENY agar tidak mengubah permissions file yang sudah ada secara paksa (menghindari bug icon hilang)
+                    cmd = f'icacls "{path}" /deny *S-1-1-0:(OI)(CI)(IO)(D,DC) /C /Q'
                     logger.debug(f"Locking {path}")
                 else:
                     # Remove the explicit deny
+                    # KITA MENGGUNAKAN /T DI SINI HANYA UNTUK MEMBERSIHKAN KEKACAUAN VERSI SEBELUMNYA JIKA SUDAH TERLANJUR MENYEBAR
                     cmd = f'icacls "{path}" /remove:d *S-1-1-0 /T /C /Q'
                     logger.debug(f"Unlocking {path}")
                     
