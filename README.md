@@ -1,3 +1,5 @@
+> 🌐 **Language:** 🇮🇩 Indonesia | [🇺🇸 English](README.en.md)
+
 # 🛡️ GC Toxic Shield
 **Brand:** GC Net Security Suite  
 **Version:** 1.0 (Google Speech Edition)  
