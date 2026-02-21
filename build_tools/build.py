@@ -51,7 +51,7 @@ def build():
         "--noconfirm",
         "--name", "GCToxicShield",
         "--onedir",                # Startup lebih cepat di PC klien
-        "--console",               # Console untuk debug (ganti --windowed untuk produksi)
+        "--windowed",              # Produksi: sembunyikan terminal agar lebih aman dari heuristik AV
         "--manifest", MANIFEST_PATH,  # UAC admin prompt → keyboard hook stabil
 
         # ── Collect-all (UI + Tray + Pillow) ──

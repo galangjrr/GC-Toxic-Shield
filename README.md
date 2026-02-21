@@ -61,6 +61,20 @@ Aplikasi akan dibungkus sebagai `GCToxicShield.exe` satu folder (*one-dir*) untu
 
 ---
 
+## 🎮 Windows Defender & Anti-Cheat Compatibility
+GC Toxic Shield menggunakan teknik **Win32 API Global Keyboard Hooks** untuk memblokir input *Alt+Tab* dan *Windows Key* saat *Lockdown Overlay* aktif. Teknik ini diwajikan untuk mencegah pengguna mencurangi sistem sanksi warnet.
+
+Namun, meng-hook input secara global sering kali dicurigai oleh sistem keamanan:
+1. **Windows Defender / Antivirus:** Karena aplikasi ini di-*build* dengan PyInstaller dan tidak memiliki sertifikat *Digital Signature* (Code Signing Certificate) berbayar, AV mungkin mendeteksinya sebagai *False Positive* (misal: `Trojan:Win32/Wacatac` atau serupa).
+   - **Solusi:** Tambahkan folder `dist/GCToxicShield/` ke dalam **Exclusion / Pengecualian** Windows Defender di tiap PC Client.
+   - *Architecture note:* Build versi *Production* menggunakan mode `--windowed` (tanpa console) dan `--onedir` (tanpa temp extraction) untuk meminimalkan deteksi heuristik sejauh mungkin.
+2. **Game Anti-Cheat (Vanguard, XignCode, HackShield, dll):** Anti-cheat tingkat *Kernel (Ring-0)* seperti *Valorant Vanguard* sangat agresif terhadap *overlay* atau *hook* dari aplikasi pihak ketiga yang tidak tersertifikasi. 
+   - Aplikasi ini didesain se-*pasif* mungkin (hanya meng-*hook* saat *lockdown* terjadi). 
+   - **Solusi:** Pastikan folder aplikasi dimasukkan ke *whitelist* Anti-Cheat jika memungkinkan, atau jika masih terjadi konflik saat *lockdown*, pertimbangkan mematikan fitur *Lockdown Overlay* dan cukup gunakan *WarningBox* saja.
+
+
+---
+
 ## 🔒 Security
 - **UAC Manifest:** `.exe` secara inheren akan selalu meminta akses *Administrator* agar *Keyboard Hook* *Overlay System* dapan berjalan di atas game *Full-Screen*.
 - **Dashboard Authentication:** UI Admin disembunyikan total di latar belakang. Saat aplikasi pertama berjalan/saat dibuka lewat tray, perlu *Password Authentication* untuk membukanya.

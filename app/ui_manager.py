@@ -33,7 +33,7 @@ logger = logging.getLogger("GCToxicShield.UI")
 REFRESH_INTERVAL_MS = 2000    # Refresh Logs/Stats setiap 2 detik
 VU_METER_INTERVAL_MS = 50     # Refresh VU Meter setiap 50ms (smooth)
 WINDOW_WIDTH = 900
-WINDOW_HEIGHT = 650  # Sedikit diperbesar untuk audio controls
+WINDOW_HEIGHT = 800  # Diperbesar agar semua menu admin muat
 
 # ── Paths (PyInstaller-compatible) ─────────────────────────────
 from app._paths import WORDLIST_PATH, CSV_PATH
@@ -95,7 +95,15 @@ class AdminDashboard:
         # ── Root Window ──
         self._root = ctk.CTk()
         self._root.title("🛡️ GC Toxic Shield — Admin Dashboard")
-        self._root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        
+        # Center Window
+        self._root.update_idletasks()
+        ws = self._root.winfo_screenwidth()
+        hs = self._root.winfo_screenheight()
+        x = (ws // 2) - (WINDOW_WIDTH // 2)
+        y = (hs // 2) - (WINDOW_HEIGHT // 2)
+        self._root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
+        
         self._root.minsize(800, 500)
         self._root.protocol("WM_DELETE_WINDOW", self._handle_close)
 
@@ -671,6 +679,28 @@ class AdminDashboard:
         self._gain_label = ctk.CTkLabel(slider_row, text="1.0x", width=40)
         self._gain_label.pack(side="right", padx=5)
 
+        # ── Password Settings ──
+        pwd_frame = ctk.CTkFrame(parent)
+        pwd_frame.pack(fill="x", padx=10, pady=5)
+
+        ctk.CTkLabel(
+            pwd_frame,
+            text="🔑 Pengaturan Password",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).pack(anchor="w", padx=15, pady=(10, 5))
+
+        self._old_pwd_entry = ctk.CTkEntry(pwd_frame, placeholder_text="Password Saat Ini", show="*")
+        self._old_pwd_entry.pack(fill="x", padx=15, pady=5)
+
+        self._new_pwd_entry = ctk.CTkEntry(pwd_frame, placeholder_text="Password Baru", show="*")
+        self._new_pwd_entry.pack(fill="x", padx=15, pady=5)
+
+        ctk.CTkButton(
+            pwd_frame,
+            text="Ubah Password",
+            fg_color="#00BCD4", hover_color="#00ACC1", text_color="black", font=ctk.CTkFont(weight="bold"),
+            command=self._change_password_action
+        ).pack(anchor="w", padx=15, pady=10)
 
         # ── Safety Exit (Existing) ──
         safety_frame = ctk.CTkFrame(parent)
@@ -740,6 +770,27 @@ class AdminDashboard:
 
     def _reset_violations(self):
         if self._lockdown_mgr: self._lockdown_mgr.reset()
+
+    def _change_password_action(self):
+        if not self._auth: return
+        from tkinter import messagebox
+        old_pwd = self._old_pwd_entry.get()
+        new_pwd = self._new_pwd_entry.get()
+
+        if not old_pwd or not new_pwd:
+            messagebox.showwarning("Peringatan", "Harap isi kedua kolom password!")
+            return
+
+        if not self._auth.verify_password(old_pwd):
+            messagebox.showerror("Error", "Password Saat Ini salah!")
+            return
+
+        if self._auth.change_password(new_pwd):
+            messagebox.showinfo("Sukses", "Password berhasil diubah!")
+            self._old_pwd_entry.delete(0, "end")
+            self._new_pwd_entry.delete(0, "end")
+        else:
+            messagebox.showerror("Error", "Gagal mengubah password. Cek log untuk detail.")
 
     # ================================================================
     # TIMERS & CLEANUP
