@@ -40,17 +40,19 @@ class GithubUpdater:
             if not latest_version:
                 return False, "", "", ""
                 
-            curr = self.current_version.replace("v", "").strip()
-            lat = latest_version.replace("v", "").strip()
-            
-            # Simple version parsing (e.g., "1.0.5" -> (1, 0, 5))
+            import re
+
             def parse_ver(v_str):
+                # Ekstrak semua grup angka dalam string (misal "v.1.0.5" -> ["1", "0", "5"])
+                numbers = re.findall(r'\d+', v_str)
+                if not numbers:
+                    return (0, 0, 0)
                 try:
-                    return tuple(map(int, (v_str.split(".") + ["0", "0"])[:3]))
+                    return tuple(map(int, (numbers + ["0", "0"])[:3]))
                 except ValueError:
                     return (0, 0, 0)
                 
-            if parse_ver(lat) > parse_ver(curr):
+            if parse_ver(latest_version) > parse_ver(self.current_version):
                 assets = data.get("assets", [])
                 zip_url = ""
                 for asset in assets:
