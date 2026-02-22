@@ -1,0 +1,438 @@
+# =============================================================
+# GC Toxic Shield — Network Client
+# =============================================================
+# Modul komunikasi klien yang berjalan non-blocking di
+# background thread. Menghubungkan PC klien ke Admin Server.
+#
+# Fitur:
+# - Auto-reconnect jika koneksi terputus (setiap 15 detik)
+# - Heartbeat LISTENING setiap 10 detik
+# - Event Reporter: lapor pelanggaran ke server secara instan
+# - Remote Command Listener: terima REMOTE_LOCK / REMOTE_WARNING
+# =============================================================
+
+import asyncio
+import json
+import logging
+import socket
+import threading
+import time
+from typing import Optional
+
+logger = logging.getLogger("GCToxicShield.NetworkClient")
+
+# ── Constants ──────────────────────────────────────────────────
+HEARTBEAT_INTERVAL = 10      # Detik antar heartbeat
+RECONNECT_DELAY    = 15      # Detik sebelum mencoba reconnect
+CONNECT_TIMEOUT    = 5       # Detik timeout saat connect
+READ_TIMEOUT       = 60      # Detik timeout saat menunggu data server
+
+
+class NetworkClient:
+    """
+    Async TCP client yang berjalan di daemon thread terpisah.
+
+    Gunakan:
+        client = NetworkClient(
+            server_ip="192.168.1.100",
+            server_port=9000,
+            pc_name="PC-01",
+            root=tk_root,           # tk root untuk root.after() dispatch
+            penalty_mgr=penalty_mgr # PenaltyManager instance
+        )
+        client.start()
+        ...
+        client.report_violation(level=2, trigger_word="kata")
+        ...
+        client.stop()
+    """
+
+    def __init__(
+        self,
+        server_ip: str,
+        server_port: int = 9000,
+        pc_name: Optional[str] = None,
+        root=None,          # tkinter root (untuk root.after dispatch)
+        penalty_mgr=None,   # PenaltyManager instance
+        app_version: str = "v1.0.0",
+    ):
+        self.server_ip = server_ip
+        self.server_port = server_port
+        self.pc_name = pc_name or self._get_pc_name()
+        self._root = root
+        self._penalty_mgr = penalty_mgr
+        self._app_version = app_version
+
+        # ── State ──
+        self._running = False
+        self._connected = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._writer: Optional[asyncio.StreamWriter] = None
+        self._writer_lock = asyncio.Lock()
+
+        # Queue untuk violation reports (thread-safe)
+        self._violation_queue: asyncio.Queue = None
+
+        logger.info(
+            "NetworkClient initialized | PC='%s' | Server=%s:%d",
+            self.pc_name, self.server_ip, self.server_port
+        )
+
+    # ── Public API ──────────────────────────────────────────
+
+    def start(self):
+        """Start the async event loop in a daemon thread."""
+        if self._running:
+            return
+        self._running = True
+        t = threading.Thread(
+            target=self._run_event_loop,
+            name="NetworkClient-Loop",
+            daemon=True,
+        )
+        t.start()
+        logger.info("NetworkClient started (background thread).")
+
+    def stop(self):
+        """Gracefully stop the client."""
+        self._running = False
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+        logger.info("NetworkClient stopped.")
+
+    def report_violation(self, level: int, trigger_word: str):
+        """
+        Thread-safe: report a violation to the server.
+        Can be called from any thread (including main/audio thread).
+        """
+        if not self._connected or not self._loop:
+            return
+        packet = {
+            "type": "VIOLATION",
+            "level": level,
+            "trigger": trigger_word,
+        }
+        asyncio.run_coroutine_threadsafe(
+            self._enqueue_violation(packet), self._loop
+        )
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    # ── Internal: Event Loop ─────────────────────────────────
+
+    def _run_event_loop(self):
+        """Run a new asyncio event loop in this thread."""
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._violation_queue = asyncio.Queue()
+        try:
+            self._loop.run_until_complete(self._connect_loop())
+        except Exception as e:
+            logger.error("NetworkClient loop error: %s", e)
+        finally:
+            logger.info("NetworkClient event loop ended.")
+
+    async def _connect_loop(self):
+        """
+        Outer reconnect loop.
+        Tries to connect, runs session, then waits before retrying.
+        """
+        while self._running:
+            try:
+                logger.info(
+                    "Connecting to server %s:%d ...",
+                    self.server_ip, self.server_port
+                )
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(self.server_ip, self.server_port),
+                    timeout=CONNECT_TIMEOUT,
+                )
+                self._writer = writer
+                self._connected = True
+                logger.info("✓ Connected to server!")
+
+                # Run the session (heartbeat + listener + reporter)
+                await self._run_session(reader, writer)
+
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Connection timeout to %s:%d — retrying in %ds",
+                    self.server_ip, self.server_port, RECONNECT_DELAY
+                )
+            except ConnectionRefusedError:
+                logger.warning(
+                    "Server %s:%d refused connection — retrying in %ds",
+                    self.server_ip, self.server_port, RECONNECT_DELAY
+                )
+            except OSError as e:
+                logger.warning("Network error: %s — retrying in %ds", e, RECONNECT_DELAY)
+            except Exception as e:
+                logger.error("Unexpected error: %s — retrying in %ds", e, RECONNECT_DELAY)
+            finally:
+                self._connected = False
+                self._writer = None
+
+            if self._running:
+                await asyncio.sleep(RECONNECT_DELAY)
+
+    async def _run_session(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ):
+        """
+        Single connected session.
+        Runs three concurrent tasks:
+        1. REGISTER + Heartbeat sender
+        2. Incoming command listener
+        3. Violation queue sender
+        """
+        try:
+            # Register immediately
+            await self._send(writer, {
+                "type": "REGISTER",
+                "name": self.pc_name,
+                "version": self._app_version,
+            })
+            logger.info("REGISTER sent as '%s' (v%s)", self.pc_name, self._app_version)
+
+            # Run all tasks concurrently — cancel them all on any failure
+            await asyncio.gather(
+                self._heartbeat_loop(writer),
+                self._listen_loop(reader),
+                self._violation_sender_loop(writer),
+            )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("Session error: %s", e)
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+            logger.info("Session ended — disconnected from server.")
+
+    # ── Heartbeat Loop ───────────────────────────────────────
+
+    async def _heartbeat_loop(self, writer: asyncio.StreamWriter):
+        """
+        Send HEARTBEAT every HEARTBEAT_INTERVAL seconds.
+        Raises on write failure to break the session.
+        """
+        while self._running and self._connected:
+            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            if not self._running or not self._connected:
+                break
+            try:
+                await self._send(writer, {
+                    "type": "HEARTBEAT",
+                    "version": self._app_version,
+                })
+                logger.debug("♥ Heartbeat sent (v%s)", self._app_version)
+            except Exception as e:
+                logger.warning("Heartbeat failed: %s", e)
+                raise  # Break the session to trigger reconnect
+
+    # ── Listen Loop ──────────────────────────────────────────
+
+    async def _listen_loop(self, reader: asyncio.StreamReader):
+        """
+        Receive and process commands from server.
+        Handles: REMOTE_LOCK, REMOTE_WARNING, SYNC_SANCTIONS, ACK.
+        """
+        while self._running and self._connected:
+            try:
+                line = await asyncio.wait_for(reader.readline(), timeout=READ_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.debug("Listen timeout — connection may be idle")
+                continue
+
+            if not line:
+                logger.warning("Server closed connection.")
+                break
+
+            try:
+                packet = json.loads(line.decode("utf-8").strip())
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                logger.warning("Invalid packet from server: %s", line[:80])
+                continue
+
+            ptype = packet.get("type", "")
+
+            if ptype == "ACK":
+                logger.debug("ACK: %s", packet.get("message", ""))
+
+            elif ptype == "REMOTE_LOCK":
+                duration = packet.get("duration", 60)
+                logger.warning("⚡ REMOTE_LOCK received (duration=%ds)", duration)
+                self._dispatch_remote_lock(duration)
+
+            elif ptype == "REMOTE_WARNING":
+                message = packet.get("message", "⚠️ Peringatan dari Admin.")
+                logger.warning("⚡ REMOTE_WARNING received")
+                self._dispatch_remote_warning(message)
+
+            elif ptype == "REMOTE_UPDATE":
+                logger.info("⚡ REMOTE_UPDATE command received")
+                self._dispatch_remote_update()
+
+            elif ptype == "SYNC_SANCTIONS":
+                sanction_list = packet.get("sanction_list", [])
+                logger.info("📡 SYNC_SANCTIONS received (%d items)", len(sanction_list))
+                self._apply_sanctions_sync(sanction_list)
+
+            else:
+                logger.debug("Unknown server packet type: %s", ptype)
+
+        self._connected = False
+
+    # ── Violation Queue Sender ────────────────────────────────
+
+    async def _enqueue_violation(self, packet: dict):
+        """Put a violation packet on the queue."""
+        if self._violation_queue:
+            await self._violation_queue.put(packet)
+
+    async def _violation_sender_loop(self, writer: asyncio.StreamWriter):
+        """
+        Drain the violation queue and send each packet.
+        Runs concurrently with heartbeat and listen loops.
+        """
+        while self._running and self._connected:
+            try:
+                # Wait up to 1 second for a packet
+                packet = await asyncio.wait_for(
+                    self._violation_queue.get(), timeout=1.0
+                )
+                await self._send(writer, packet)
+                logger.info(
+                    "→ Violation reported: Level %d | '%s'",
+                    packet.get("level", 0), packet.get("trigger", "")
+                )
+            except asyncio.TimeoutError:
+                pass  # No violation — keep looping
+            except Exception as e:
+                logger.warning("Violation send error: %s", e)
+                raise  # Break session
+
+    # ── Remote Command Dispatcher ─────────────────────────────
+
+    def _dispatch_remote_lock(self, duration: int):
+        """Dispatch REMOTE_LOCK to penalty_mgr via main thread."""
+        if not self._penalty_mgr or not self._root:
+            logger.warning("No penalty_mgr — ignoring REMOTE_LOCK")
+            return
+
+        def _execute():
+            try:
+                # Force execute a lockdown-style sanction
+                # We bypass anti-overlap by directly dispatching
+                self._penalty_mgr._is_penalty_active = False
+                self._penalty_mgr._dispatch_lockdown(
+                    level=0,
+                    message=f"🔒 Sanksi dikirim oleh Admin GC Net.\nDurasi: {duration} detik.",
+                    duration=duration,
+                    matched_words=["[REMOTE]"]
+                )
+                self._penalty_mgr._is_penalty_active = True
+            except Exception as e:
+                logger.error("REMOTE_LOCK dispatch error: %s", e)
+
+        self._root.after(0, _execute)
+
+    def _dispatch_remote_warning(self, message: str):
+        """Dispatch REMOTE_WARNING to penalty_mgr via main thread."""
+        if not self._penalty_mgr or not self._root:
+            logger.warning("No penalty_mgr — ignoring REMOTE_WARNING")
+            return
+
+        def _execute():
+            try:
+                self._penalty_mgr._is_penalty_active = False
+                self._penalty_mgr._dispatch_warning(
+                    level=0,
+                    message=message,
+                    warning_delay=5,
+                    matched_words=["[REMOTE]"]
+                )
+                self._penalty_mgr._is_penalty_active = True
+            except Exception as e:
+                logger.error("REMOTE_WARNING dispatch error: %s", e)
+
+        self._root.after(0, _execute)
+
+    def _dispatch_remote_update(self):
+        """Dispatch REMOTE_UPDATE command to check github and download update."""
+        if not self._penalty_mgr or not self._penalty_mgr._auth:
+            logger.warning("Missing penalty_mgr or auth_service, cannot remote update")
+            return
+
+        def _execute():
+            from app.updater import GithubUpdater
+            import tkinter.messagebox as messagebox
+
+            config = self._penalty_mgr._auth._config
+            repo = config.get("GithubRepo", "galangjrr/GC-Toxic-Shield")
+
+            # Check update
+            updater = GithubUpdater(repo, self._app_version)
+            has_update, lat_ver, dl_url, notes = updater.check_for_updates()
+
+            if has_update and dl_url:
+                logger.info("V%s found. Downloading from %s", lat_ver, dl_url)
+                # Show an overlay/message so user knows why app is downloading
+                if self._root:
+                    self._root.attributes("-topmost", True)
+                    messagebox.showinfo(
+                        "Pembaruan Otomatis",
+                        f"Admin mengirimkan perintah update ke veri {lat_ver}.\n"
+                        "Aplikasi sedang mengunduh pembaruan di latar belakang dan akan restart otomatis.",
+                        parent=self._root
+                    )
+                updater.download_and_install_async(dl_url)
+            else:
+                logger.info("No newer version found on Github or update failed.")
+
+        if self._root:
+            self._root.after(0, _execute)
+        else:
+            # Fallback if no root (headless)
+            threading.Thread(target=_execute, daemon=True).start()
+
+    def _apply_sanctions_sync(self, sanction_list: list):
+        """Update local config with server-provided sanction_list."""
+        if not self._penalty_mgr:
+            return
+        try:
+            pm = self._penalty_mgr
+            if pm._auth:
+                # Save to config via auth_service
+                config = pm._auth._config
+                config["sanction_list"] = sanction_list
+                pm._auth._save_config()
+                # Reload into penalty_mgr
+                if self._root:
+                    self._root.after(0, pm.reload_config)
+                logger.info(
+                    "✓ sanction_list synced: %d items", len(sanction_list)
+                )
+        except Exception as e:
+            logger.error("Sanctions sync error: %s", e)
+
+    # ── Helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def _get_pc_name() -> str:
+        """Get the PC hostname as a friendly name."""
+        try:
+            return socket.gethostname()
+        except Exception:
+            return "Unknown-PC"
+
+    async def _send(self, writer: asyncio.StreamWriter, data: dict):
+        """Send a JSON packet to the server."""
+        payload = json.dumps(data, ensure_ascii=False) + "\n"
+        writer.write(payload.encode("utf-8"))
+        await writer.drain()

@@ -83,6 +83,10 @@ class AdminDashboard:
         self._gain_slider = None
         self._gain_label = None
 
+        # Link PenaltyManager configuration sync to the callback
+        if self._penalty_mgr:
+            self._penalty_mgr.on_sync_callback = self._on_penalty_sync
+
     @property
     def root(self) -> Optional[ctk.CTk]:
         return self._root
@@ -728,6 +732,12 @@ class AdminDashboard:
         self._penalty_reset_entry.delete(0, "end")
         self._penalty_reset_entry.insert(0, str(reset_min))
 
+    def _on_penalty_sync(self):
+        """Network callback: Reload sanctions UI when config synced from server."""
+        if self._root:
+            self._root.after(0, self._load_sanctions_config)
+
+
     def _refresh_sanction_listbox(self):
         """Refresh listbox display from _sanctions_data."""
         self._sanction_listbox.delete(0, "end")
@@ -1017,6 +1027,57 @@ class AdminDashboard:
             command=self._emergency_exit, height=35
         ).pack(fill="x", padx=15, pady=(10, 15))
 
+        # 5. Server Center Connection
+        net_frame = ctk.CTkFrame(right_col)
+        net_frame.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(net_frame, text="📡 Server Center", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(
+            net_frame, text="Hubungkan ke GC Toxic Shield Center untuk monitoring terpusat.",
+            font=ctk.CTkFont(size=11), text_color="#aaaaaa", wraplength=350,
+        ).pack(anchor="w", padx=15, pady=(0, 5))
+
+        ctk.CTkLabel(net_frame, text="Server IP:").pack(anchor="w", padx=15, pady=(5, 0))
+        self._server_ip_entry = ctk.CTkEntry(net_frame, placeholder_text="Contoh: 192.168.1.100", width=240)
+        self._server_ip_entry.pack(anchor="w", padx=15, pady=3)
+
+        ctk.CTkLabel(net_frame, text="Port:").pack(anchor="w", padx=15, pady=(5, 0))
+        self._server_port_entry = ctk.CTkEntry(net_frame, placeholder_text="9000", width=100)
+        self._server_port_entry.pack(anchor="w", padx=15, pady=3)
+
+        # Load saved values
+        if self._auth:
+            saved_ip = self._auth.get_config("ServerIP", "")
+            saved_port = self._auth.get_config("ServerPort", 9000)
+            if saved_ip:
+                self._server_ip_entry.insert(0, saved_ip)
+            self._server_port_entry.insert(0, str(saved_port))
+
+        # Status indicator
+        self._net_status_label = ctk.CTkLabel(
+            net_frame, text="● Tidak Terhubung", text_color="#888888",
+            font=ctk.CTkFont(size=12)
+        )
+        self._net_status_label.pack(anchor="w", padx=15, pady=(5, 5))
+
+        # Buttons
+        net_btn_frame = ctk.CTkFrame(net_frame, fg_color="transparent")
+        net_btn_frame.pack(fill="x", padx=15, pady=(5, 15))
+
+        ctk.CTkButton(
+            net_btn_frame, text="💾 Simpan & Hubungkan", fg_color="#2e7d32", hover_color="#1b5e20",
+            font=ctk.CTkFont(weight="bold"), height=35,
+            command=self._save_and_connect_network
+        ).pack(side="left", expand=True, fill="x", padx=(0, 5))
+
+        ctk.CTkButton(
+            net_btn_frame, text="⛔ Putuskan", fg_color="#c62828", hover_color="#b71c1c",
+            font=ctk.CTkFont(weight="bold"), height=35,
+            command=self._disconnect_network
+        ).pack(side="left", expand=True, fill="x")
+
+        # Refresh status periodically
+        self._schedule_network_status_refresh()
+
     # ── Audio Callbacks ──
 
     def _populate_devices(self):
@@ -1070,6 +1131,91 @@ class AdminDashboard:
             self._gain_label.configure(text=f"{value:.1f}x")
         if self._auth_service:
             self._auth_service.save_config("AudioGain", value)
+
+    # ── Network Config Callbacks ──
+
+    def _save_and_connect_network(self):
+        """Save ServerIP/Port to config and start/restart NetworkClient."""
+        from tkinter import messagebox
+
+        ip = self._server_ip_entry.get().strip()
+        port_str = self._server_port_entry.get().strip()
+
+        if not ip:
+            messagebox.showwarning("IP Kosong", "Masukkan IP Server Center terlebih dahulu.")
+            return
+
+        try:
+            port = int(port_str) if port_str else 9000
+        except ValueError:
+            port = 9000
+
+        # Save to config
+        if self._auth:
+            self._auth.update_config("ServerIP", ip)
+            self._auth.update_config("ServerPort", port)
+
+        # Stop existing client if any
+        if hasattr(self, '_network_client') and self._network_client:
+            self._network_client.stop()
+
+        # Create and start new client
+        try:
+            from app.network_client import NetworkClient
+            self._network_client = NetworkClient(
+                server_ip=ip,
+                server_port=port,
+                root=self._root,
+                penalty_mgr=self._penalty_mgr,
+            )
+            if self._penalty_mgr:
+                self._penalty_mgr.network_client = self._network_client
+            self._network_client.start()
+            messagebox.showinfo(
+                "Koneksi Dimulai",
+                f"Mencoba menghubungkan ke {ip}:{port}...\n"
+                f"Cek status di panel 'Server Center'."
+            )
+            logger.info("NetworkClient started via UI → %s:%d", ip, port)
+        except Exception as e:
+            messagebox.showerror("Error", f"Gagal memulai NetworkClient:\n{e}")
+            logger.error("NetworkClient UI start error: %s", e)
+
+    def _disconnect_network(self):
+        """Stop NetworkClient and clear ServerIP from config."""
+        from tkinter import messagebox
+
+        if hasattr(self, '_network_client') and self._network_client:
+            self._network_client.stop()
+            self._network_client = None
+            if self._penalty_mgr:
+                self._penalty_mgr.network_client = None
+
+        # Clear ServerIP so it won't auto-connect on next startup
+        if self._auth:
+            self._auth.update_config("ServerIP", "")
+
+        self._server_ip_entry.delete(0, "end")
+        self._net_status_label.configure(text="● Tidak Terhubung", text_color="#888888")
+        messagebox.showinfo("Terputus", "Koneksi ke Server Center telah diputus.")
+        logger.info("NetworkClient disconnected via UI")
+
+    def _schedule_network_status_refresh(self):
+        """Periodically refresh the network status indicator."""
+        if not self._root:
+            return
+        try:
+            client = getattr(self, '_network_client', None)
+            if client and client.is_connected:
+                self._net_status_label.configure(text="● Terhubung ke Server", text_color="#4CAF50")
+            elif client:
+                self._net_status_label.configure(text="● Menghubungkan...", text_color="#FFC107")
+            else:
+                self._net_status_label.configure(text="● Tidak Terhubung", text_color="#888888")
+        except Exception:
+            pass
+        t = self._root.after(3000, self._schedule_network_status_refresh)
+        self._timers.append(t)
 
     # ── Existing Admin Callbacks ──
 

@@ -186,6 +186,7 @@ def main():
             from app.system_service import SystemService
             from app.auth_service import AuthService
             from app.login_dialog import LoginDialog
+            from app.network_client import NetworkClient
         except ImportError as e:
             show_messagebox("GC Toxic Shield — Import Error", str(e), 0x10)
             sys.exit(1)
@@ -218,6 +219,27 @@ def main():
             on_violation=on_violation,
         )
         dashboard._penalty_mgr = penalty_mgr
+
+        # ── Init Network Client (Background Comm) ──
+        server_ip = auth_service.get_config("ServerIP", "")
+        server_port = auth_service.get_config("ServerPort", 9000)
+        network_client = None
+
+        if server_ip:
+            try:
+                network_client = NetworkClient(
+                    server_ip=server_ip,
+                    server_port=int(server_port),
+                    root=root,
+                    penalty_mgr=penalty_mgr,
+                    app_version=f"v{APP_VERSION}"
+                )
+                penalty_mgr.network_client = network_client
+                logger.info("NetworkClient configured → %s:%d", server_ip, server_port)
+            except Exception as e:
+                logger.error("NetworkClient init failed: %s", e)
+        else:
+            logger.info("NetworkClient DISABLED (ServerIP not configured)")
 
         # --- Init Desktop Guard ---
         desktop_guard = DesktopGuard(root=root)
@@ -256,6 +278,12 @@ def main():
         
         logger_svc.start()
         engine.start()
+
+        # ── Start Network Client ──
+        if network_client:
+            network_client.start()
+            dashboard._network_client = network_client
+            logger.info("✓ NetworkClient started → %s:%d", server_ip, server_port)
 
         # ── Login Helper ──
 
@@ -360,6 +388,8 @@ def main():
         engine.stop()
         logger_svc.stop()
         tray_icon.stop()
+        if network_client:
+            network_client.stop()
 
     except Exception as e:
         # Catch-all for any startup crash

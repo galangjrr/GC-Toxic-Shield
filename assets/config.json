@@ -17,13 +17,13 @@
     "sanction_list": [
         {
             "type": "WARNING",
-            "message": "⚠️ Peringatan Pertama\n\nSistem mendeteksi penggunaan kata-kata yang tidak pantas.\nMohon jaga tutur kata Anda.",
+            "message": "⚠️ Peringatan Pertama\n\nMohon jaga tutur kata Anda.",
             "duration": 0,
             "warning_delay": 5
         },
         {
             "type": "WARNING",
-            "message": "⚠️ Peringatan Kedua\n\nAnda KEMBALI menggunakan bahasa yang tidak sopan.\nIni adalah peringatan terakhir sebelum lockdown.",
+            "message": "⚠️ Peringatan Kedua\n\nIni peringatan terakhir sebelum lockdown.",
             "duration": 0,
             "warning_delay": 15
         },
@@ -35,15 +35,9 @@
         },
         {
             "type": "WARNING",
-            "message": "⚠️ Peringatan Lanjutan\n\nAnda sudah melewati satu siklus hukuman.\nPelanggaran berikutnya akan mendapat sanksi lebih berat.",
+            "message": "⚠️ Peringatan Lanjutan\n\nPelanggaran berikutnya mendapat sanksi lebih berat.",
             "duration": 0,
             "warning_delay": 15
-        },
-        {
-            "type": "WARNING",
-            "message": "⚠️ Peringatan Serius\n\nPelanggaran berulang terdeteksi.\nLockdown berikutnya akan lebih lama.",
-            "duration": 0,
-            "warning_delay": 30
         },
         {
             "type": "LOCKDOWN",
@@ -57,5 +51,7 @@
             "duration": 300,
             "warning_delay": 0
         }
-    ]
+    ],
+    "ServerIP": "192.168.18.197",
+    "ServerPort": 9000
 }

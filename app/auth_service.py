@@ -98,6 +98,8 @@ class AuthService:
             "PenaltyResetMinutes": 60,
             "LockdownTitle": "AREA TERKUNCI",
             "LockdownMessage": "Anda melanggar aturan berbahasa di GC Net.",
+            "ServerIP": "",     # Kosong = NetworkClient nonaktif
+            "ServerPort": 9000, # Port TCP server admin
             "sanction_list": [
                 {
                     "type": "WARNING",

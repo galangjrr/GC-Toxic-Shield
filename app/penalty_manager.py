@@ -110,6 +110,8 @@ class PenaltyManager:
         self._overlay = overlay
         self._auth = auth_service
         self._on_violation = on_violation
+        self.network_client = None  # Set externally after NetworkClient init
+        self.on_sync_callback: Optional[Callable] = None  # Hook for UI to refresh on broadcast
 
         # ── State ──
         self._current_level = 0
@@ -212,6 +214,16 @@ class PenaltyManager:
                 )
             except Exception as e:
                 logger.error("Violation callback error: %s", e)
+
+        # ── Network Report: Kirim ke Admin Server ──
+        if self.network_client:
+            try:
+                trigger_word = matched_words[0] if matched_words else "—"
+                self.network_client.report_violation(
+                    level=self._current_level, trigger_word=trigger_word
+                )
+            except Exception as e:
+                logger.warning("Network report failed: %s", e)
 
         # ── Dispatch to main thread ──
         try:
@@ -320,6 +332,11 @@ class PenaltyManager:
             len(self._sanction_list),
             self._penalty_reset_minutes,
         )
+        if self.on_sync_callback:
+            try:
+                self.on_sync_callback()
+            except Exception as e:
+                logger.error("on_sync_callback error: %s", e)
 
     def _get_sanction(self, level_index: int) -> dict:
         """
