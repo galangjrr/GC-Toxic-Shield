@@ -191,6 +191,13 @@ class NetworkClient:
             if self._running:
                 await asyncio.sleep(RECONNECT_DELAY)
 
+    def _get_mac_address(self) -> str:
+        """Mendapatkan MAC Address fisik dari PC."""
+        import uuid
+        mac = uuid.getnode()
+        formatted_mac = ':'.join(('%012X' % mac)[i:i+2] for i in range(0, 12, 2))
+        return formatted_mac
+
     async def _run_session(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ):
@@ -207,6 +214,7 @@ class NetworkClient:
                 "type": "REGISTER",
                 "name": self.pc_name,
                 "version": self._app_version,
+                "mac_address": self._get_mac_address(),
             })
             logger.info("REGISTER sent as '%s' (v%s)", self.pc_name, self._app_version)
 

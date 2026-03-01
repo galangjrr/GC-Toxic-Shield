@@ -39,7 +39,7 @@ logger = logging.getLogger("GCToxicShield")
 
 # ── Constants ────────────────────────────────────────────────
 APP_NAME = "GC Toxic Shield"
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 BRAND = "GC Net Security Suite"
 GITHUB_REPO = "galangjrr/GC-Toxic-Shield"  # <-- Admin warns to replace this
 
@@ -68,8 +68,22 @@ def check_admin() -> bool:
 
 def validate_assets_directory() -> bool:
     import shutil
-    from app._paths import WORDLIST_PATH, ASSETS_DIR
+    from app._paths import WORDLIST_PATH, ASSETS_DIR, CONFIG_PATH, APP_ROOT
     
+    # ── Migration: config.json ──
+    if not os.path.isfile(CONFIG_PATH):
+        legacy_config = os.path.join(APP_ROOT, "config.json")
+        if not os.path.isfile(legacy_config):
+            legacy_config = os.path.join(ASSETS_DIR, "config.json")
+            
+        if os.path.isfile(legacy_config):
+            try:
+                shutil.copy2(legacy_config, CONFIG_PATH)
+                logger.info("✓ Legacy config.json migrated to APPDATA")
+            except Exception as e:
+                logger.error("Failed to migrate config.json: %s", e)
+
+    # ── Fallback: word_list.json ──
     if not os.path.isfile(WORDLIST_PATH):
         default_wordlist = os.path.join(ASSETS_DIR, "word_list.json")
         if os.path.isfile(default_wordlist):
