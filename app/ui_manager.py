@@ -316,7 +316,8 @@ class AdminDashboard:
         self._wordlist_listbox = tk.Listbox(
             listbox_frame_l, font=("Consolas", 13),
             bg="#2b2b2b", fg="#ffffff", selectbackground="#c62828",
-            borderwidth=0, highlightthickness=0, activestyle="none"
+            borderwidth=0, highlightthickness=0, activestyle="none",
+            exportselection=False
         )
         self._wordlist_listbox.pack(side="left", fill="both", expand=True)
         scroll_l = ctk.CTkScrollbar(listbox_frame_l, command=self._wordlist_listbox.yview)
@@ -362,7 +363,7 @@ class AdminDashboard:
             listbox_frame_r, font=("Consolas", 13),
             bg="#2b2b2b", fg="#ffffff", selectbackground="#1a73e8",
             borderwidth=0, highlightthickness=0, activestyle="none",
-            state="disabled"
+            state="disabled", exportselection=False
         )
         self._alias_listbox.pack(side="left", fill="both", expand=True)
         scroll_r = ctk.CTkScrollbar(listbox_frame_r, command=self._alias_listbox.yview)
@@ -401,6 +402,7 @@ class AdminDashboard:
     def _refresh_words_display(self):
         if not self._wordlist_listbox: return
         data = self._load_wordlist_json()
+        if data is None: return
         toxic_words = sorted(set(data.get("toxic_words", [])))
         
         self._wordlist_listbox.delete(0, "end")
@@ -420,44 +422,68 @@ class AdminDashboard:
         self._refresh_aliases_display()
 
     def _add_word(self):
-        word = self._word_entry.get().strip().lower()
-        if not word: return
-        
-        data = self._load_wordlist_json()
-        words = data.get("toxic_words", [])
-        
-        if word in [w.lower() for w in words]:
-            self._word_entry.delete(0, "end")
-            return
+        try:
+            word = self._word_entry.get().strip().lower()
+            if not word: return
             
-        words.append(word)
-        data["toxic_words"] = words
-        self._save_wordlist_json(data)
-        
-        self._detector.reload_wordlist()
-        self._refresh_words_display()
-        self._word_entry.delete(0, "end")
+            data = self._load_wordlist_json()
+            if data is None: return
+            
+            words = data.get("toxic_words", [])
+            
+            if word in [w.lower() for w in words if isinstance(w, str)]:
+                self._word_entry.delete(0, "end")
+                return
+                
+            words.append(word)
+            data["toxic_words"] = words
+            self._save_wordlist_json(data)
+            
+            self._detector.reload_wordlist()
+            self._refresh_words_display()
+            self._word_entry.delete(0, "end")
+        except Exception as e:
+            logger.error("Crash in _add_word: %s", e)
+            from tkinter import messagebox
+            if self._root: messagebox.showerror("Crash", f"Terjadi kesalahan di _add_word:\n{str(e)}")
 
     def _remove_word(self):
-        if not self._selected_word: return
-        
-        data = self._load_wordlist_json()
-        words = data.get("toxic_words", [])
-        mapping = data.get("phonetic_mapping", {})
-        
-        # Hapus kata
-        words = [w for w in words if w.lower() != self._selected_word.lower()]
-        data["toxic_words"] = words
-        
-        # Hapus semua alias yang merujuk ke kata tersebut
-        keys_to_delete = [k for k, v in mapping.items() if v.lower() == self._selected_word.lower()]
-        for k in keys_to_delete:
-            del mapping[k]
-        data["phonetic_mapping"] = mapping
-        
-        self._save_wordlist_json(data)
-        self._detector.reload_wordlist()
-        self._refresh_words_display()
+        try:
+            sel = self._wordlist_listbox.curselection()
+            if not sel:
+                from tkinter import messagebox
+                if self._root: messagebox.showwarning("Peringatan", "Pilih kata yang ingin dihapus terlebih dahulu.", parent=self._root)
+                return
+                
+            target_word = self._wordlist_listbox.get(sel[0]).strip()
+            
+            data = self._load_wordlist_json()
+            if data is None: return
+            
+            words = data.get("toxic_words", [])
+            mapping = data.get("phonetic_mapping", {})
+            
+            # Hapus kata
+            words = [w for w in words if isinstance(w, str) and w.lower() != target_word.lower()]
+            data["toxic_words"] = words
+            
+            # Hapus semua alias yang merujuk ke kata tersebut
+            if isinstance(mapping, dict):
+                keys_to_delete = [k for k, v in mapping.items() if isinstance(v, str) and v.lower() == target_word.lower()]
+                for k in keys_to_delete:
+                    del mapping[k]
+                data["phonetic_mapping"] = mapping
+            
+            from tkinter import messagebox
+            if self._root: messagebox.showinfo("DEBUG_SAVE", f"Menghapus '{target_word}'.\nTersisa {len(words)} kata dan {len(data['phonetic_mapping'])} alias yang akan disave ke JSON.", parent=self._root)
+            
+            self._save_wordlist_json(data)
+            self._detector.reload_wordlist()
+            self._refresh_words_display()
+        except Exception as e:
+            logger.error("Crash in _remove_word: %s", e)
+            from tkinter import messagebox
+            if self._root: messagebox.showerror("Crash", f"Terjadi kesalahan sistem saat menghapus kata:\n{str(e)}")
 
     # ── Callbacks Kanan (Aliases) ──
     def _refresh_aliases_display(self):
@@ -480,6 +506,7 @@ class AdminDashboard:
         self._btn_add_alias_del.configure(state="normal")
         
         data = self._load_wordlist_json()
+        if data is None: return
         mapping = data.get("phonetic_mapping", {})
         
         # Cari semua key (alias) yang valuenya adalah word yang terpilih
@@ -493,6 +520,7 @@ class AdminDashboard:
         if not alias: return
         
         data = self._load_wordlist_json()
+        if data is None: return
         mapping = data.get("phonetic_mapping", {})
         
         mapping[alias] = self._selected_word.lower()
@@ -510,6 +538,7 @@ class AdminDashboard:
         alias_to_remove = self._alias_listbox.get(sel[0]).strip()
         
         data = self._load_wordlist_json()
+        if data is None: return
         mapping = data.get("phonetic_mapping", {})
         
         if alias_to_remove in mapping:
@@ -548,8 +577,12 @@ class AdminDashboard:
             if "phonetic_mapping" not in data: data["phonetic_mapping"] = {}
             
             return data
-        except Exception:
-            return default_data
+        except Exception as e:
+            logger.error("Failed to read wordlist: %s", e)
+            from tkinter import messagebox
+            if self._root:
+                messagebox.showerror("Gagal Membaca File", f"Gagal membaca word_list.json:\n{e}\n\nAksi dibatalkan agar data tidak hilang.", parent=self._root)
+            return None
 
     def _save_wordlist_json(self, data: dict):
         try:
@@ -557,6 +590,9 @@ class AdminDashboard:
                 json.dump(data, f, ensure_ascii=False, indent=4)
         except Exception as e:
             logger.error("Failed to save wordlist: %s", e)
+            from tkinter import messagebox
+            if self._root:
+                messagebox.showerror("Gagal Simpan", f"Gagal menyimpan wordlist.json:\n{e}", parent=self._root)
 
     # ================================================================
     # TAB 3: LOGS
@@ -735,7 +771,19 @@ class AdminDashboard:
     def _on_penalty_sync(self):
         """Network callback: Reload sanctions UI when config synced from server."""
         if self._root:
-            self._root.after(0, self._load_sanctions_config)
+            def _reload():
+                if not self._auth: return
+                self._sanctions_data = self._auth.get_config("sanction_list", [])
+                if not isinstance(self._sanctions_data, list):
+                    self._sanctions_data = []
+                self._refresh_sanction_listbox()
+                
+                # Also reload penalty reset minutes
+                reset_min = self._auth.get_config("PenaltyResetMinutes", 60)
+                if hasattr(self, '_penalty_reset_entry') and self._penalty_reset_entry:
+                    self._penalty_reset_entry.delete(0, "end")
+                    self._penalty_reset_entry.insert(0, str(reset_min))
+            self._root.after(0, _reload)
 
 
     def _refresh_sanction_listbox(self):
@@ -967,19 +1015,12 @@ class AdminDashboard:
         ).pack(anchor="w", padx=15, pady=(10, 5))
 
         # Settings Lock
-        self._settings_lock_var = ctk.StringVar(value="off")
+        is_locked = SystemService.is_windows_settings_locked()
+        self._settings_lock_var = ctk.StringVar(value="on" if is_locked else "off")
         ctk.CTkSwitch(
             system_frame, text="Kunci Windows Settings & Control Panel", variable=self._settings_lock_var,
             onvalue="on", offvalue="off", command=self._on_settings_lock_toggle
-        ).pack(anchor="w", padx=15, pady=(10, 5))
-
-        # Desktop Guard
-        self._desktop_guard_var = ctk.StringVar(value="off") # Secara default OFF pada first-run
-        self._guard_switch = ctk.CTkSwitch(
-            system_frame, text="Surgical Desktop Guard (Blokir Edit)", variable=self._desktop_guard_var,
-            onvalue="on", offvalue="off", command=self._on_desktop_guard_toggle
-        )
-        self._guard_switch.pack(anchor="w", padx=15, pady=(10, 15))
+        ).pack(anchor="w", padx=15, pady=(10, 15))
 
         # Pembaruan Jaringan (Updater)
         update_frame = ctk.CTkFrame(left_col)
@@ -1167,6 +1208,7 @@ class AdminDashboard:
                 server_port=port,
                 root=self._root,
                 penalty_mgr=self._penalty_mgr,
+                app_version=f"v{self._app_version}"
             )
             if self._penalty_mgr:
                 self._penalty_mgr.network_client = self._network_client
@@ -1191,11 +1233,7 @@ class AdminDashboard:
             if self._penalty_mgr:
                 self._penalty_mgr.network_client = None
 
-        # Clear ServerIP so it won't auto-connect on next startup
-        if self._auth:
-            self._auth.update_config("ServerIP", "")
-
-        self._server_ip_entry.delete(0, "end")
+        # Remove clearing of ServerIP to remember it permanently
         self._net_status_label.configure(text="● Tidak Terhubung", text_color="#888888")
         messagebox.showinfo("Terputus", "Koneksi ke Server Center telah diputus.")
         logger.info("NetworkClient disconnected via UI")
@@ -1230,14 +1268,6 @@ class AdminDashboard:
         from app.system_service import SystemService
         if self._autostart_var.get() == "on": SystemService.enable_autostart()
         else: SystemService.disable_autostart()
-
-    def _on_desktop_guard_toggle(self):
-        if not self._desktop_guard:
-            return
-        if self._desktop_guard_var.get() == "on":
-            self._desktop_guard.enable()
-        else:
-            self._desktop_guard.disable()
 
     def _on_settings_lock_toggle(self):
         from app.system_service import SystemService

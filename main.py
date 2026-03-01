@@ -39,7 +39,7 @@ logger = logging.getLogger("GCToxicShield")
 
 # ── Constants ────────────────────────────────────────────────
 APP_NAME = "GC Toxic Shield"
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 BRAND = "GC Net Security Suite"
 GITHUB_REPO = "galangjrr/GC-Toxic-Shield"  # <-- Admin warns to replace this
 
@@ -67,12 +67,26 @@ def check_admin() -> bool:
 
 
 def validate_assets_directory() -> bool:
-    from app._paths import WORDLIST_PATH
+    import shutil
+    from app._paths import WORDLIST_PATH, ASSETS_DIR
+    
     if not os.path.isfile(WORDLIST_PATH):
-        msg = f"File 'word_list.json' tidak ditemukan!\n{WORDLIST_PATH}"
-        logger.error("✗ Wordlist not found: %s", WORDLIST_PATH)
-        show_messagebox("GC Toxic Shield — Error", msg, 0x10)
-        return False
+        default_wordlist = os.path.join(ASSETS_DIR, "word_list.json")
+        if os.path.isfile(default_wordlist):
+            try:
+                shutil.copy2(default_wordlist, WORDLIST_PATH)
+                logger.info("✓ Default wordlist copied to APPDATA")
+                return True
+            except Exception as e:
+                msg = f"Gagal menyalin word_list.json ke APPDATA:\n{e}"
+                logger.error(msg)
+                show_messagebox("GC Toxic Shield — Error", msg, 0x10)
+                return False
+        else:
+            msg = f"File 'word_list.json' tidak ditemukan!\n{WORDLIST_PATH}"
+            logger.error("✗ Wordlist not found: %s", WORDLIST_PATH)
+            show_messagebox("GC Toxic Shield — Error", msg, 0x10)
+            return False
     return True
 
 
@@ -181,7 +195,6 @@ def main():
             from app.logger_service import LoggerService
             from app.overlay import LockdownOverlay
             from app.penalty_manager import PenaltyManager
-            from app.desktop_guard import DesktopGuard
             from app.ui_manager import AdminDashboard
             from app.system_service import SystemService
             from app.auth_service import AuthService
@@ -219,6 +232,7 @@ def main():
             on_violation=on_violation,
         )
         dashboard._penalty_mgr = penalty_mgr
+        penalty_mgr.on_sync_callback = dashboard._on_penalty_sync
 
         # ── Init Network Client (Background Comm) ──
         server_ip = auth_service.get_config("ServerIP", "")
@@ -232,6 +246,7 @@ def main():
                     server_port=int(server_port),
                     root=root,
                     penalty_mgr=penalty_mgr,
+                    detector=detector,
                     app_version=f"v{APP_VERSION}"
                 )
                 penalty_mgr.network_client = network_client
@@ -240,12 +255,6 @@ def main():
                 logger.error("NetworkClient init failed: %s", e)
         else:
             logger.info("NetworkClient DISABLED (ServerIP not configured)")
-
-        # --- Init Desktop Guard ---
-        desktop_guard = DesktopGuard(root=root)
-        dashboard._desktop_guard = desktop_guard
-        # Feature starts disabled by default upon first install. 
-        # Admin can turn it on from the Dashboard UI.
 
         # --- Init Audio Engine ---
         def on_transcription(text: str):
@@ -325,8 +334,6 @@ def main():
                 logger.info("Exit cancelled by user")
             def force_shutdown_hook():
                 logger.info("Main shutdown hook triggered...")
-                if desktop_guard:
-                    desktop_guard.cleanup()
                 SystemService.force_shutdown(engine, logger_svc, overlay)
             show_login_dialog(
                 on_success=_on_exit_success,
@@ -335,7 +342,7 @@ def main():
             )
 
         tray_menu = pystray.Menu(
-            pystray.MenuItem("Show Dashboard", on_open_dashboard, default=True),
+            pystray.MenuItem("Settings...", on_open_dashboard, default=True),
             pystray.MenuItem("Restart Engine", on_restart_engine),
             pystray.MenuItem("Exit", on_exit_app),
         )

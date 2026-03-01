@@ -17,38 +17,200 @@
     "sanction_list": [
         {
             "type": "WARNING",
-            "message": "⚠️ Peringatan Pertama\n\nMohon jaga tutur kata Anda.",
+            "message": "⚠️ Peringatan Level 1\n\nSistem mendeteksi bahasa tidak pantas.",
             "duration": 0,
-            "warning_delay": 5
+            "warning_delay": 0
         },
         {
             "type": "WARNING",
-            "message": "⚠️ Peringatan Kedua\n\nIni peringatan terakhir sebelum lockdown.",
+            "message": "⚠️ Peringatan Level 2\n\nAnda kembali melanggar. Tombol tutup ditahan.",
             "duration": 0,
-            "warning_delay": 15
+            "warning_delay": 10
         },
         {
             "type": "LOCKDOWN",
-            "message": "Anda melanggar aturan berbahasa di GC Net.",
+            "message": "Sanksi Level 3\n\nPelanggaran berulang. Akses dikunci selama 1 Menit.",
             "duration": 60,
             "warning_delay": 0
         },
         {
             "type": "WARNING",
-            "message": "⚠️ Peringatan Lanjutan\n\nPelanggaran berikutnya mendapat sanksi lebih berat.",
+            "message": "⚠️ Peringatan Level 4\n\nSistem mendeteksi bahasa tidak pantas.",
             "duration": 0,
-            "warning_delay": 15
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 5\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 20
         },
         {
             "type": "LOCKDOWN",
-            "message": "Pelanggaran berulang. Akses dikunci lebih lama.",
+            "message": "Sanksi Level 6\n\nPelanggaran berulang. Akses dikunci selama 3 Menit.",
             "duration": 180,
             "warning_delay": 0
         },
         {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 7\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 8\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 30
+        },
+        {
             "type": "LOCKDOWN",
-            "message": "Pelanggaran berat. Ini adalah sanksi maksimum.",
+            "message": "Sanksi Level 9\n\nPelanggaran berulang. Akses dikunci selama 5 Menit.",
             "duration": 300,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 10\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 11\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 40
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Sanksi Level 12\n\nPelanggaran berulang. Akses dikunci selama 7 Menit.",
+            "duration": 420,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 13\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 14\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 50
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Sanksi Level 15\n\nPelanggaran berulang. Akses dikunci selama 9 Menit.",
+            "duration": 540,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 16\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 17\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 60
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Sanksi Level 18\n\nPelanggaran berulang. Akses dikunci selama 11 Menit.",
+            "duration": 660,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 19\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 20\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 70
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Sanksi Level 21\n\nPelanggaran berulang. Akses dikunci selama 13 Menit.",
+            "duration": 780,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 22\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 23\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 80
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Sanksi Level 24\n\nPelanggaran berulang. Akses dikunci selama 15 Menit.",
+            "duration": 900,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 25\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 26\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 90
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Sanksi Level 27\n\nPelanggaran berulang. Akses dikunci selama 17 Menit.",
+            "duration": 1020,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 28\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 29\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 100
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Sanksi Level 30\n\nPelanggaran berulang. Akses dikunci selama 19 Menit.",
+            "duration": 1140,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 31\n\nSistem mendeteksi bahasa tidak pantas.",
+            "duration": 0,
+            "warning_delay": 0
+        },
+        {
+            "type": "WARNING",
+            "message": "⚠️ Peringatan Level 32\n\nAnda kembali melanggar. Tombol tutup ditahan.",
+            "duration": 0,
+            "warning_delay": 110
+        },
+        {
+            "type": "LOCKDOWN",
+            "message": "Sanksi Level 33\n\nPelanggaran berulang. Akses dikunci selama 20 Menit.",
+            "duration": 1200,
             "warning_delay": 0
         }
     ],

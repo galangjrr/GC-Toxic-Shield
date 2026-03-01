@@ -159,6 +159,13 @@ class PenaltyManager:
         """Current sanction list (read-only copy)."""
         return list(self._sanction_list)
 
+    def reset_level(self):
+        """Force reset the violation level back to 0 (Level 1 UI)."""
+        with self._lock:
+            self._current_level = 0
+            self._is_penalty_active = False
+        logger.info("Penalty level reset to 0 by remote command.")
+
     # ================================================================
     # CORE: EXECUTE SANCTION
     # ================================================================

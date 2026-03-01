@@ -1,27 +1,87 @@
 {
-    "toxic_words": [
-        "kontol",
-        "memek",
-        "ngentot",
-        "pepek",
-        "peler",
-        "itil",
-        "ngewe",
-        "ngentod",
-        "pler",
-        "kunyuk",
-        "pantek",
-        "pante"
+  "toxic_words": {
+    "kontol": [
+      "kntl",
+      "kntol",
+      "kontl",
+      "contol",
+      "k0nt0l",
+      "k0ntol",
+      "kont0l",
+      "konthol"
     ],
-    "phonetic_mapping": {
-        "peeler": "peler",
-        "peller": "peler",
-        "dealer": "peler",
-        "fill": "itil",
-        "until": "itil",
-        "mem ek": "memek",
-        "me mek": "memek",
-        "control": "kontol",
-        "k lontol": "kontol"
-    }
+    "memek": [
+      "mmk",
+      "memeq",
+      "meki",
+      "mekmek",
+      "m3m3k",
+      "m3mek",
+      "mem3k"
+    ],
+    "ngentot": [
+      "ngentod",
+      "ngntt",
+      "ngntd",
+      "ngentt",
+      "ngntot",
+      "ngent0t",
+      "ngent0d",
+      "kentot",
+      "kentod"
+    ],
+    "ngewe": [
+      "ngwe",
+      "ngew",
+      "ngw",
+      "ng3w3"
+    ],
+    "peler": [
+      "pler",
+      "pelir"
+    ],
+    "itil": [
+      "itl",
+      "1t1l",
+      "itill"
+    ],
+    "jembut": [
+      "jembud",
+      "jmbut",
+      "jmbud",
+      "jembot",
+      "jmbot",
+      "j3mbut"
+    ],
+    "toket": [
+      "t0k3t",
+      "t0ket",
+      "tok3t",
+      "tt",
+      "tetek",
+      "t3t3k",
+      "teteq"
+    ],
+    "coli": [
+      "coly",
+      "c0li",
+      "c0ly"
+    ],
+    "colmek": [
+      "clmk",
+      "colmq"
+    ],
+    "sange": [
+      "sangek",
+      "sang3",
+      "sng",
+      "sangeh"
+    ],
+    "peju": [
+      "pejuh",
+      "pjuh",
+      "pju"
+    ]
+  },
+  "phonetic_mapping": {}
 }

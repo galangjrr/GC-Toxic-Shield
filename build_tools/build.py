@@ -60,6 +60,9 @@ def build():
         "--collect-all", "PIL",             # Explicitly collect PIL namespace
         "--collect-all", "pystray",         # System Tray — ikon + menu
 
+        # ── Bundle Assets ──
+        "--add-data", f"{os.path.join(PROJECT_ROOT, 'assets')}{os.pathsep}assets",
+
         # ── Hidden imports ──
         "--hidden-import", "speech_recognition",
         "--hidden-import", "pyaudio",
@@ -82,7 +85,6 @@ def build():
         "--hidden-import", "app.logger_service",
         "--hidden-import", "app.overlay",
         "--hidden-import", "app.penalty_manager",
-        "--hidden-import", "app.desktop_guard",
         "--hidden-import", "app.ui_manager",
         "--hidden-import", "app.system_service",
         "--hidden-import", "app.auth_service",
@@ -134,15 +136,7 @@ def build():
 
     print("\n  ✓ Build completed!")
 
-    # ── Copy Assets ──
-    print("\n  Copying assets...")
-
-    assets_src = os.path.join(PROJECT_ROOT, "assets")
-    assets_dst = os.path.join(DIST_DIR, "assets")
-    if os.path.isdir(assets_src):
-        shutil.copytree(assets_src, assets_dst, dirs_exist_ok=True)
-        print(f"  ✓ assets/ → {assets_dst}")
-
+    # ── Create empty folders ──
     logs_dst = os.path.join(DIST_DIR, "logs")
     os.makedirs(logs_dst, exist_ok=True)
     print(f"  ✓ logs/ created")

@@ -14,6 +14,7 @@
 import asyncio
 import json
 import logging
+import os
 import socket
 import threading
 import time
@@ -54,6 +55,7 @@ class NetworkClient:
         pc_name: Optional[str] = None,
         root=None,          # tkinter root (untuk root.after dispatch)
         penalty_mgr=None,   # PenaltyManager instance
+        detector=None,      # ToxicDetector instance untuk hot-reload wordlist
         app_version: str = "v1.0.0",
     ):
         self.server_ip = server_ip
@@ -61,6 +63,7 @@ class NetworkClient:
         self.pc_name = pc_name or self._get_pc_name()
         self._root = root
         self._penalty_mgr = penalty_mgr
+        self._detector = detector
         self._app_version = app_version
 
         # ── State ──
@@ -69,6 +72,9 @@ class NetworkClient:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._writer_lock = asyncio.Lock()
+        
+        from app._paths import APPDATA_DIR
+        self._offline_logs_file = os.path.join(APPDATA_DIR, "offline_logs.json")
 
         # Queue untuk violation reports (thread-safe)
         self._violation_queue: asyncio.Queue = None
@@ -105,13 +111,21 @@ class NetworkClient:
         Thread-safe: report a violation to the server.
         Can be called from any thread (including main/audio thread).
         """
-        if not self._connected or not self._loop:
+        if not self._loop:
             return
+            
+        # Create packet once with original timestamp
         packet = {
             "type": "VIOLATION",
             "level": level,
             "trigger": trigger_word,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
         }
+        
+        if not self._connected:
+            self._save_to_offline_log(packet)
+            return
+            
         asyncio.run_coroutine_threadsafe(
             self._enqueue_violation(packet), self._loop
         )
@@ -277,11 +291,20 @@ class NetworkClient:
             elif ptype == "REMOTE_UPDATE":
                 logger.info("⚡ REMOTE_UPDATE command received")
                 self._dispatch_remote_update()
+                
+            elif ptype == "RESET_LEVEL":
+                logger.info("⚡ RESET_LEVEL command received")
+                self._dispatch_remote_reset_level()
 
             elif ptype == "SYNC_SANCTIONS":
                 sanction_list = packet.get("sanction_list", [])
                 logger.info("📡 SYNC_SANCTIONS received (%d items)", len(sanction_list))
                 self._apply_sanctions_sync(sanction_list)
+                
+            elif ptype == "SYNC_WORDLIST":
+                wordlist_data = packet.get("wordlist_data", {})
+                logger.info("📖 SYNC_WORDLIST received")
+                self._apply_wordlist_sync(wordlist_data)
 
             else:
                 logger.debug("Unknown server packet type: %s", ptype)
@@ -289,6 +312,63 @@ class NetworkClient:
         self._connected = False
 
     # ── Violation Queue Sender ────────────────────────────────
+
+    def _save_to_offline_log(self, packet: dict):
+        """Save packet to offline JSON file synchronously."""
+        import os, json
+        queue = []
+        if os.path.exists(self._offline_logs_file):
+            try:
+                with open(self._offline_logs_file, "r", encoding="utf-8") as f:
+                    queue = json.load(f)
+            except Exception: pass
+            
+        queue.append(packet)
+        try:
+            with open(self._offline_logs_file, "w", encoding="utf-8") as f:
+                json.dump(queue, f, ensure_ascii=False)
+        except Exception as e:
+            logger.error("Failed writing offline log: %s", e)
+
+    async def _sync_offline_logs(self, writer: asyncio.StreamWriter):
+        """Send all offline cache before starting normal violation queue."""
+        import os, json
+        if not os.path.exists(self._offline_logs_file):
+            return
+            
+        try:
+            with open(self._offline_logs_file, "r", encoding="utf-8") as f:
+                queue = json.load(f)
+        except Exception:
+            return
+            
+        if not queue:
+            return
+            
+        # Send one by one
+        sent_count = 0
+        for packet in queue:
+            try:
+                await self._send(writer, packet)
+                sent_count += 1
+                await asyncio.sleep(0.05) # small delay to prevent overwhelming socket
+            except Exception as e:
+                logger.warning("Offline sync send error: %s", e)
+                break
+                
+        # Rewrite remaining
+        remaining = queue[sent_count:]
+        if remaining:
+            try:
+                with open(self._offline_logs_file, "w", encoding="utf-8") as f:
+                    json.dump(remaining, f, ensure_ascii=False)
+            except: pass
+        else:
+            try: os.remove(self._offline_logs_file)
+            except: pass
+                
+        if sent_count > 0:
+            logger.info("Synced %d offline violations to server.", sent_count)
 
     async def _enqueue_violation(self, packet: dict):
         """Put a violation packet on the queue."""
@@ -300,22 +380,31 @@ class NetworkClient:
         Drain the violation queue and send each packet.
         Runs concurrently with heartbeat and listen loops.
         """
+        # First sync whatever was stored offline while disconnected
+        await self._sync_offline_logs(writer)
+        
         while self._running and self._connected:
             try:
                 # Wait up to 1 second for a packet
                 packet = await asyncio.wait_for(
                     self._violation_queue.get(), timeout=1.0
                 )
-                await self._send(writer, packet)
-                logger.info(
-                    "→ Violation reported: Level %d | '%s'",
-                    packet.get("level", 0), packet.get("trigger", "")
-                )
+                try:
+                    await self._send(writer, packet)
+                    logger.info(
+                        "→ Violation reported: Level %d | '%s'",
+                        packet.get("level", 0), packet.get("trigger", "")
+                    )
+                except Exception as e:
+                    logger.warning("Violation send error: %s", e)
+                    # Jika gagal kirim, simpan di offline log beserta isi queue
+                    self._save_to_offline_log(packet)
+                    while not self._violation_queue.empty():
+                        p = self._violation_queue.get_nowait()
+                        self._save_to_offline_log(p)
+                    raise  # Break session
             except asyncio.TimeoutError:
                 pass  # No violation — keep looping
-            except Exception as e:
-                logger.warning("Violation send error: %s", e)
-                raise  # Break session
 
     # ── Remote Command Dispatcher ─────────────────────────────
 
@@ -350,17 +439,32 @@ class NetworkClient:
 
         def _execute():
             try:
+                # Bypass current violation level logic and show pure warning
                 self._penalty_mgr._is_penalty_active = False
                 self._penalty_mgr._dispatch_warning(
                     level=0,
-                    message=message,
-                    warning_delay=5,
+                    message=f"Pesan dari Admin:\n\n{message}",
+                    warning_delay=10,
                     matched_words=["[REMOTE]"]
                 )
                 self._penalty_mgr._is_penalty_active = True
             except Exception as e:
                 logger.error("REMOTE_WARNING dispatch error: %s", e)
 
+        self._root.after(0, _execute)
+
+    def _dispatch_remote_reset_level(self):
+        """Dispatch RESET_LEVEL to penalty_mgr via main thread."""
+        if not self._penalty_mgr or not self._root:
+            logger.warning("No penalty_mgr — ignoring RESET_LEVEL")
+            return
+            
+        def _execute():
+            try:
+                self._penalty_mgr.reset_level()
+            except Exception as e:
+                logger.error("RESET_LEVEL dispatch error: %s", e)
+                
         self._root.after(0, _execute)
 
     def _dispatch_remote_update(self):
@@ -420,6 +524,29 @@ class NetworkClient:
                 )
         except Exception as e:
             logger.error("Sanctions sync error: %s", e)
+
+    def _apply_wordlist_sync(self, wordlist_data: dict):
+        """Update local wordlist.json with server-provided wordlist_data."""
+        from app._paths import WORDLIST_PATH
+        import json
+        
+        if not self._detector:
+            logger.warning("No detector instance — cannot apply remote wordlist")
+            return
+            
+        try:
+            with open(WORDLIST_PATH, "w", encoding="utf-8") as f:
+                json.dump(wordlist_data, f, ensure_ascii=False, indent=2)
+            
+            # Hot reload detector on main thread
+            if self._root:
+                self._root.after(0, self._detector.reload_wordlist)
+            else:
+                self._detector.reload_wordlist()
+                
+            logger.info("✓ wordlist_data synced and applied successfully.")
+        except Exception as e:
+            logger.error("Wordlist sync error: %s", e)
 
     # ── Helpers ──────────────────────────────────────────────
 

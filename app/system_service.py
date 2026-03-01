@@ -203,6 +203,29 @@ class SystemService:
             logger.error("✗ Failed to toggle Windows Settings: %s", e)
             return False
 
+    @staticmethod
+    def is_windows_settings_locked() -> bool:
+        """
+        Mengecek apakah pengaturan Windows (NoControlPanel) sedang terkunci di Registry.
+        """
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                SystemService.POLICIES_EXPLORER_PATH,
+                0,
+                winreg.KEY_READ,
+            )
+            try:
+                value, _ = winreg.QueryValueEx(key, "NoControlPanel")
+                winreg.CloseKey(key)
+                return value == 1
+            except FileNotFoundError:
+                winreg.CloseKey(key)
+                return False
+        except Exception:
+            return False
+
     # ================================================================
     # EMERGENCY SAFETY EXIT
     # ================================================================
