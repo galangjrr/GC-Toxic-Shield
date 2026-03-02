@@ -70,37 +70,45 @@ def validate_assets_directory() -> bool:
     import shutil
     from app._paths import WORDLIST_PATH, ASSETS_DIR, CONFIG_PATH, APP_ROOT
     
+    # Kemungkinan folder assets di samping executable pada v1.0.6
+    legacy_assets_folder = os.path.join(APP_ROOT, "assets")
+
     # ── Migration: config.json ──
     if not os.path.isfile(CONFIG_PATH):
-        legacy_config = os.path.join(APP_ROOT, "config.json")
-        if not os.path.isfile(legacy_config):
-            legacy_config = os.path.join(ASSETS_DIR, "config.json")
-            
-        if os.path.isfile(legacy_config):
-            try:
-                shutil.copy2(legacy_config, CONFIG_PATH)
-                logger.info("✓ Legacy config.json migrated to APPDATA")
-            except Exception as e:
-                logger.error("Failed to migrate config.json: %s", e)
+        legacy_config_candidates = [
+            os.path.join(APP_ROOT, "config.json"),
+            os.path.join(legacy_assets_folder, "config.json")
+        ]
+        for cand in legacy_config_candidates:
+            if os.path.isfile(cand):
+                try:
+                    shutil.copy2(cand, CONFIG_PATH)
+                    logger.info("✓ Legacy config.json migrated to APPDATA from %s", cand)
+                    break
+                except Exception as e:
+                    logger.error("Failed to migrate config.json from %s: %s", cand, e)
 
-    # ── Fallback: word_list.json ──
+    # ── Fallback/Migration: word_list.json ──
     if not os.path.isfile(WORDLIST_PATH):
-        default_wordlist = os.path.join(ASSETS_DIR, "word_list.json")
-        if os.path.isfile(default_wordlist):
-            try:
-                shutil.copy2(default_wordlist, WORDLIST_PATH)
-                logger.info("✓ Default wordlist copied to APPDATA")
-                return True
-            except Exception as e:
-                msg = f"Gagal menyalin word_list.json ke APPDATA:\n{e}"
-                logger.error(msg)
-                show_messagebox("GC Toxic Shield — Error", msg, 0x10)
-                return False
-        else:
-            msg = f"File 'word_list.json' tidak ditemukan!\n{WORDLIST_PATH}"
-            logger.error("✗ Wordlist not found: %s", WORDLIST_PATH)
-            show_messagebox("GC Toxic Shield — Error", msg, 0x10)
-            return False
+        legacy_wordlist_candidates = [
+            os.path.join(APP_ROOT, "word_list.json"),
+            os.path.join(legacy_assets_folder, "word_list.json"),
+            os.path.join(ASSETS_DIR, "word_list.json") # Default internal bundled
+        ]
+        for cand in legacy_wordlist_candidates:
+            if os.path.isfile(cand):
+                try:
+                    shutil.copy2(cand, WORDLIST_PATH)
+                    logger.info("✓ word_list.json setup in APPDATA from %s", cand)
+                    return True
+                except Exception as e:
+                    logger.error("Failed to copy word_list.json from %s: %s", cand, e)
+
+        msg = f"File 'word_list.json' tidak ditemukan!\n{WORDLIST_PATH}"
+        logger.error("✗ Wordlist not found: %s", WORDLIST_PATH)
+        show_messagebox("GC Toxic Shield — Error", msg, 0x10)
+        return False
+        
     return True
 
 
@@ -214,6 +222,7 @@ def main():
             from app.auth_service import AuthService
             from app.login_dialog import LoginDialog
             from app.network_client import NetworkClient
+            from app.installer_guard import InstallerGuard
         except ImportError as e:
             show_messagebox("GC Toxic Shield — Import Error", str(e), 0x10)
             sys.exit(1)
@@ -307,6 +316,11 @@ def main():
             network_client.start()
             dashboard._network_client = network_client
             logger.info("✓ NetworkClient started → %s:%d", server_ip, server_port)
+
+        # ── Start Installer Guard (Real-time setup execution block) ──
+        installer_guard = InstallerGuard(root=root, network_client=network_client)
+        installer_guard.enable()
+        dashboard._installer_guard = installer_guard
 
         # ── Login Helper ──
 
@@ -406,6 +420,7 @@ def main():
         root.mainloop()
 
         # Cleanup
+        installer_guard.disable()
         engine.stop()
         logger_svc.stop()
         tray_icon.stop()

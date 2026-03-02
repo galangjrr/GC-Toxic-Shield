@@ -18,7 +18,14 @@ import os
 import socket
 import threading
 import time
-from typing import Optional
+from typing import List, Optional
+
+from app.logger_service import LoggerService
+from app.penalty_manager import PenaltyManager
+from app.system_service import SystemService
+from app.detector import ToxicDetector
+from app.auth_service import AuthService
+
 
 logger = logging.getLogger("GCToxicShield.NetworkClient")
 
@@ -57,6 +64,7 @@ class NetworkClient:
         penalty_mgr=None,   # PenaltyManager instance
         detector=None,      # ToxicDetector instance untuk hot-reload wordlist
         app_version: str = "v1.0.0",
+        auth_service: Optional[AuthService] = None,
     ):
         self.server_ip = server_ip
         self.server_port = server_port
@@ -64,6 +72,7 @@ class NetworkClient:
         self._root = root
         self._penalty_mgr = penalty_mgr
         self._detector = detector
+        self._auth_service = auth_service or AuthService()
         self._app_version = app_version
 
         # ── State ──
@@ -119,6 +128,28 @@ class NetworkClient:
             "type": "VIOLATION",
             "level": level,
             "trigger": trigger_word,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        if not self._connected:
+            self._save_to_offline_log(packet)
+            return
+            
+        asyncio.run_coroutine_threadsafe(
+            self._enqueue_violation(packet), self._loop
+        )
+
+    def report_blocked_installer(self, filename: str, trigger: str):
+        """
+        Melaporkan kejadian terblokirnya installer/setup oleh InstallerGuard.
+        """
+        if not self._loop:
+            return
+            
+        packet = {
+            "type": "INSTALLER_BLOCKED",
+            "filename": filename,
+            "trigger": trigger,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
         }
         
@@ -209,13 +240,20 @@ class NetworkClient:
         3. Violation queue sender
         """
         try:
-            # Register immediately
-            await self._send(writer, {
+            payload = {
                 "type": "REGISTER",
                 "name": self.pc_name,
                 "version": self._app_version,
                 "mac_address": self._get_mac_address(),
-            })
+                "client_config": self._auth_service._config,
+            }
+            if self._detector:
+                payload["client_wordlist"] = self._detector.words
+                payload["client_phonetic_map"] = getattr(self._detector, "_phonetic_map", {})
+            if self._penalty_mgr:
+                payload["client_sanctions"] = self._penalty_mgr.sanction_list
+
+            await self._send(writer, payload)
             logger.info("REGISTER sent as '%s' (v%s)", self.pc_name, self._app_version)
 
             # Run all tasks concurrently — cancel them all on any failure
@@ -304,15 +342,20 @@ class NetworkClient:
                 logger.info("⚡ RESET_LEVEL command received")
                 self._dispatch_remote_reset_level()
 
-            elif ptype == "SYNC_SANCTIONS":
+            elif ptype in ("SYNC_SANCTIONS", "SYNC_SANCTIONS_TARGETED"):
                 sanction_list = packet.get("sanction_list", [])
-                logger.info("📡 SYNC_SANCTIONS received (%d items)", len(sanction_list))
+                logger.info("📡 %s received (%d items)", ptype, len(sanction_list))
                 self._apply_sanctions_sync(sanction_list)
                 
-            elif ptype == "SYNC_WORDLIST":
+            elif ptype in ("SYNC_WORDLIST", "SYNC_WORDLIST_TARGETED"):
                 wordlist_data = packet.get("wordlist_data", {})
-                logger.info("📖 SYNC_WORDLIST received")
+                logger.info("📖 %s received", ptype)
                 self._apply_wordlist_sync(wordlist_data)
+
+            elif ptype == "UPDATE_CONFIG":
+                new_config = packet.get("config", {})
+                logger.info("⚙️ UPDATE_CONFIG received: %r", new_config)
+                self._dispatch_update_config(new_config)
 
             else:
                 logger.debug("Unknown server packet type: %s", ptype)
@@ -511,6 +554,69 @@ class NetworkClient:
             self._root.after(0, _execute)
         else:
             # Fallback if no root (headless)
+            threading.Thread(target=_execute, daemon=True).start()
+
+    def _dispatch_update_config(self, new_config: dict):
+        """Apply remote configuration changes passed by the server."""
+        if not self._penalty_mgr or not self._penalty_mgr._auth:
+            logger.warning("Missing penalty_mgr or auth_service, cannot remote update config")
+            return
+
+        def _execute():
+            try:
+                auth = self._penalty_mgr._auth
+                
+                # Apply Password (if changed and not empty)
+                new_pw = new_config.get("AdminPassword")
+                if new_pw and new_pw != auth.get_config("AdminPassword"):
+                    auth._config["AdminPassword"] = new_pw
+
+                # Apply Server IP
+                new_ip = new_config.get("ServerIP")
+                if new_ip:
+                    auth._config["ServerIP"] = new_ip
+                    
+                auth._save_config()
+                
+                # Check Auto-Start Logic (Requires Admin, but SystemService skips if not admin)
+                if "AutoStart" in new_config:
+                    if new_config["AutoStart"]:
+                        SystemService.enable_autostart()
+                    else:
+                        SystemService.disable_autostart()
+                        
+                # Check OS Block Logic (Settings toggle)
+                if "BlockSettings" in new_config:
+                    auth._config["BlockSettings"] = new_config["BlockSettings"]
+                    if new_config["BlockSettings"]:
+                        SystemService.toggle_windows_settings(True)
+                    else:
+                        SystemService.toggle_windows_settings(False)
+
+                # Check Installer Block Logic
+                if "BlockInstaller" in new_config:
+                    auth._config["BlockInstaller"] = new_config["BlockInstaller"]
+                    if new_config["BlockInstaller"]:
+                        SystemService.toggle_installer_block(True)
+                    else:
+                        SystemService.toggle_installer_block(False)
+
+                auth._save_config()
+                
+                logger.info("✓ Configuration synced and applied from Server.")
+
+                # If IP Changed, notify and exit to force reconnect
+                if new_ip and new_ip != self.server_ip:
+                    logger.warning("Server IP changed. Closing connection to force reconnect.")
+                    self._running = False
+                    if self._writer:
+                        self._writer.close()
+            except Exception as e:
+                logger.error("Failed to apply UPDATE_CONFIG: %s", e)
+
+        if self._root:
+            self._root.after(0, _execute)
+        else:
             threading.Thread(target=_execute, daemon=True).start()
 
     def _apply_sanctions_sync(self, sanction_list: list):

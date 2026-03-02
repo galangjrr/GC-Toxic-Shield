@@ -33,7 +33,7 @@ Sistem memiliki rekam jejak jumlah pelanggaran untuk setiap komputer (hingga riw
 - **Hardened Admin Override:** *Lockdown Overlay* memiliki *password form* tersembunyi. Admin dapat memencet tombol rahasia untuk membypass hukuman, _namun_ ini tidak akan mereset hitungan "dosa" anak tersebut kembali ke nol kecuali Admin memutihkannya sengaja ke panel Dashboard.
 - **Auto-Forgive:** Pelanggaran akan diriset otomatis ke nol jika pengguna bersih dan bersikap baik selama 60 menit.
 
-### 2. 🛡️ Surgical Desktop Guard & Settings Block
+### 2. 🛡️ Surgical Downloads Guard & Settings Block
 Mengunci OS tanpa menghancurkan UX Explorer:
 - **Block Editing (Anti-Iseng):** Pengguna dapat me-*refresh* desktop tanpa *bug* ikon lenyap, namun dilarang keras membuat folder, menghapus, ataupun mengutip data asing ke layar Desktop (otomatis dihapus dalam hitungan ms oleh *Watchdog Engine* lalu dtegur visual).
 - **Settings Lock:** Memutus akses ke App *Settings* Windows & *Control Panel* untuk melumpuhkan upaya *tampering*.
@@ -73,7 +73,7 @@ Aplikasi akan dibungkus sebagai `GCToxicShield.exe` tanpa bloatware sistem ke da
 ## 🎮 Windows Defender & Anti-Cheat Compatibility
 Aplikasi ini memanfaatkan pelacakan UI paksa yang menggunakan **Win32 API Global Keyboard Hooks** untuk memblokir aksi *Alt+Tab* dan tombol *Windows* saat hukuman *Lockdown* jatuh.
 
-- **Windows Defender:** Tambahkan jalur instalasi (`C:\GC Net\GC Toxic Shield`) ke daftar pengecualian/whitelist Defender agar fitur Desktop Guard tidak teridentifikasi sebagai *Trojan* atau pembatasan sistem iseng.
+- **Windows Defender:** Tambahkan jalur instalasi (`C:\GC Net\GC Toxic Shield`) ke daftar pengecualian/whitelist Defender agar fitur Downloads Guard tidak teridentifikasi sebagai *Trojan* atau pembatasan sistem iseng.
 - **Game Anti-Cheat (Vanguard):** Dirancang se-*pasif* mungkin (hanya meng-*hook* saat *lockdown* terjadi). Matikan *hooking* dan blokir manual dengan izin akses jika *Client* memainkan Valorant.
 
 ---

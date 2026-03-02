@@ -14,7 +14,7 @@ Aliran data (*Data Flow*):
 3. String transkripsi diserahkan ke `ToxicDetector`.
 4. Jika `ToxicDetector` mengembalikan hasil `is_toxic=True`, maka `LoggerService` akan mencatat pelanggaran tersebut ke `.csv`, lalu meneruskannya ke `PenaltyManager`.
 5. `PenaltyManager` melihat histori *(state)* komputer ini (apakah sudah melanggar ke-3, 6, 9 kali?) dan memutuskan sanksi (Warning atau Lockdown).
-6. Modul `Overlay` dan `DesktopGuard` menerima sinyal dari `PenaltyManager` untuk membekukan UI/UX OS menggunakan Win32 global hooks.
+6. Modul `Overlay` dan `InstallerGuard` menerima sinyal dari `PenaltyManager` untuk membekukan UI/UX OS menggunakan Win32 global hooks atau membunuh pengeksekusi installer terlarang.
 
 ---
 
@@ -43,8 +43,7 @@ Manajer durasi dan hitungan (*Stateful*).
 ### `app/overlay.py` & `app/desktop_guard.py` (OS Integrations)
 Lapisan *Enforcement* terberat.
 - `LockdownOverlay`: Memanggil *TopMost Fullscreen Window* berlatar hitam untuk menutupi game tanpa izin.
-- **Global Keyboard Hook (`ctypes.windll.user32.SetWindowsHookExW`)**: Dijangkar ke `overlay.py` ketika penalti aktif agar pengguna tidak sanggup menekan tombol sakti Windows: `Alt+Tab`, `Win Key`, `CTRL+ESC`, dan `Alt+ESC`.
-- `DesktopGuard`: Berbasis modul `watchdog`, memantau *Event Creation* pada ekstensi apapun di folder Desktop, dan menghapusnya secepat kilat (milidetik) demi menghindari modifikasi/sabotase iseng anak warnet.
+- `InstallerGuard`: Pemantauan secara *Real-Time* menggunakan WMI (low-priority thread). Memindai Metadata (Version Info/File Description) dari semua file eksekusi baru menggunakan `pefile`. Jika cocok dengan keyword terlarang (seperti 'setup', 'installer'), eksekusi pelakunya segera dibunuh dengan `psutil` lalu peringatan dikirimkan ke Center.
 
 ### `app/ui_manager.py`
 *Dashboard* Visual berteknologi `CustomTkinter`. Tersinkronisasi secara asinkron dengan mesin (contoh: Membaca level volume *digital gain audio* dalam pola *Polling* 50ms untuk *progress-bar* VU Meter).
@@ -104,6 +103,21 @@ Berisi variabel statis yang tidak disarankan terhapus pasca unduhan versi terbar
    - `--windowed` mematikan *Command Prompt Console*, mencegah *hook* memori terekspos sehingga heuristik *Antivirus* lebih senyap.
 
 2. Skrip Instalasi menggunakan perintah unduhan asinkronus via PowerShell tanpa menyela *thread* operasi OS, me-restart diri sendiri menggunakan metode *Batch Script Suicide* pasca-ekstrak.
+
+## 🛡️ 5. Security & Antivirus Handling (Warnet Non-Diskless)
+
+GC Toxic Shield dirancang untuk berjalan di lingkungan warnet dengan tingkat intervensi pengguna yang tinggi.
+
+### A. Penanganan Antivirus Pihak Ketiga (Avast, dsb)
+Aplikasi ini menggunakan teknik *API Hooking* (Global Keyboard Hook) dan kompilasi *PyInstaller* yang perilakunya sering dianggap sebagai anomali (False Positive) oleh antivirus pihak ketiga yang ketat seperti Avast Antivirus.
+- **Dilarang Keras Menggunakan Avast**: Instalasi GC Toxic Shield `install.ps1` akan otomatis dibatalkan secara keras jika mendeteksi *Service/Proses* Avast berjalan di latar belakang. Avast memiliki kemampuan "Self-Defense" level kernel yang akan senantiasa membunuh GC Toxic Shield.
+- **SOP Pembersihan**: Mengingat sistem PC di tempat Anda *bukan* komputer Diskless (tidak di-*Deep Freeze*), maka jika peringatan Avast muncul saat instalasi, Anda diwajibkan melakukan uninstalasi penuh atas Avast dari menu *Control Panel -> Programs and Features*, kemudian _restart_ PC sebelum mencoba kembali.
+- **Windows Defender (Bawaan)**: `install.ps1` sudah otomatis menambahkan _Exclusion_ (Pengecualian) Folder dan Proses ke dalam _Windows Defender_ untuk mengatasi proteksi bawaan OS tanpa masalah.
+
+### B. Blokade Eksekusi Installer (Anti-Adware)
+Karena pengunjung warnet membutuhkan *Hak Akses Administrator* penuh untuk memainkan game tertentu (seperti *Point Blank*), mereka rentan mengunduh dan menginstal program *Adware* berisi Avast yang merusak stabilitas Warnet.
+- **Fitur Kunci Instalasi**: Terdapat opsi saklar (Toggle) **"Blokir Instalasi Program (MSI & EXE)"** di dalam tab GUI `Admin`.
+- Menyalakan fitur ini akan menulis kunci ke *Registry Policies* (`DisableMSI=2` dan Explorer `DisallowRun`), mencegah *executable* dengan nama umum `setup.exe` atau `.msi` dijalankan oleh siapapun agar PC warnet aman dari program sampah, sembari tetap memanjakan pemain game berat.
 
 ---
 *- Author: Galang (GC Net Suite Developer).*

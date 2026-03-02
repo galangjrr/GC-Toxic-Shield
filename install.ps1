@@ -30,6 +30,29 @@ if (-not $isAdmin) {
     Exit
 }
 
+# 1.5. Deteksi Antivirus Pihak Ketiga (Avast)
+$avastProcess = Get-Process -Name "AvastSvc", "AvastUI" -ErrorAction SilentlyContinue
+if ($avastProcess) {
+    Write-Host ""
+    Write-Host "==========================================================================" -ForegroundColor Red -BackgroundColor Black
+    Write-Host " 🚨 PERINGATAN KRITIS: AVAST ANTIVIRUS TERDETEKSI 🚨 " -ForegroundColor White -BackgroundColor Red
+    Write-Host "==========================================================================" -ForegroundColor Red -BackgroundColor Black
+    Write-Host "Instalasi DIBATALKAN!" -ForegroundColor Red
+    Write-Host "PC ini memiliki Avast Antivirus yang aktif. Avast memiliki 'Self-Defense'" -ForegroundColor Yellow
+    Write-Host "yang akan memblokir dan membunuh GC Toxic Shield secara diam-diam." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "TINDAKAN YANG DIPERLUKAN (MODE PERMANEN):" -ForegroundColor White
+    Write-Host "Karena PC Client Anda tidak menggunakan sistem Diskless / Deep Freeze," -ForegroundColor Cyan
+    Write-Host "silakan HAPUS INSTALASI Avast secara manual melalui:" -ForegroundColor Cyan
+    Write-Host "Control Panel -> Programs and Features -> Cari 'Avast' -> Uninstall" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Setelah Avast bersih terhapus, jalankan ulang skrip instalasi ini kembali." -ForegroundColor Cyan
+    Write-Host "==========================================================================" -ForegroundColor Red -BackgroundColor Black
+    Write-Host ""
+    Exit
+}
+
+
 # 2. Hentikan aplikasi jika sedang berjalan (agar file bisa ditimpa)
 if (Get-Process $exeName.Replace(".exe", "") -ErrorAction SilentlyContinue) {
     Write-Host "=> Mematikan GC Toxic Shield yang sedang berjalan..." -ForegroundColor Yellow
@@ -95,6 +118,17 @@ Copy-Item -Path "$sourceDir\*" -Destination $installDir -Recurse -Force
 
 Remove-Item -Recurse -Force $tempExt
 Remove-Item $tempZipPath -Force
+
+# 6.5. Tambahkan Pengecualian Windows Defender
+Write-Host "=> Menambahkan Exclusions ke Windows Defender..."
+try {
+    Add-MpPreference -ExclusionPath $installDir -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionProcess "$installDir\$exeName" -ErrorAction SilentlyContinue
+    Write-Host "- Pengecualian berhasil ditambahkan ke Defender." -ForegroundColor Green
+}
+catch {
+    Write-Host "- Gagal menambahkan pengecualian Defender, harap tambahkan manual." -ForegroundColor Yellow
+}
 
 # 7. Membuat Shortcut di Desktop
 Write-Host "=> Membuat Shortcut di Desktop..."

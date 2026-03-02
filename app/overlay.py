@@ -218,18 +218,18 @@ class WarningBox:
 
 
 # ================================================================
-# SIMPLE WARNING BOX (Surgical Desktop Guard)
+# SIMPLE WARNING BOX (Surgical Downloads Guard)
 # ================================================================
 
 class SimpleWarningBox:
     """
-    Jendela peringatan sederhana untuk Desktop Guard.
+    Jendela peringatan sederhana untuk Installer Guard.
     Tanpa timer, hanya tombol OK, dan tidak menutupi seluruh layar.
     """
     
     _instance = None
     
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, custom_text=None):
         # Prevent multiple popups at once
         if SimpleWarningBox._instance is not None:
             return
@@ -262,9 +262,11 @@ class SimpleWarningBox:
             text_color="#FF5252"
         ).pack(pady=(0, 10))
         
+        text_to_show = custom_text if custom_text else "Dilarang mengunduh dan mengeksekusi installer di folder Downloads."
+        
         ctk.CTkLabel(
             content,
-            text="Dilarang menambah, menghapus, atau mengubah nama file di Desktop.",
+            text=text_to_show,
             font=ctk.CTkFont(size=14),
             justify="center",
             wraplength=400
@@ -281,7 +283,7 @@ class SimpleWarningBox:
         # Modal
         self._win.grab_set()
         self._win.focus_force()
-        logger.info("SimpleWarningBox shown for Desktop Guard")
+        logger.info("SimpleWarningBox shown for Downloads Guard")
         
     def _dismiss(self):
         try:

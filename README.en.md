@@ -33,7 +33,7 @@ The system keeps a strict tally of violations for each computer (until the histo
 - **Hardened Admin Override:** The *Lockdown Overlay* features a hidden password prompt. Admins can hit a secret button to bypass the punishment; _however_, this does not reset the violation count back to zero unless deliberately cleared from the Dashboard.
 - **Auto-Forgive:** The violation tracker automatically resets to zero if the user maintains clean speech and good behavior for 60 consecutive minutes.
 
-### 2. 🛡️ Surgical Desktop Guard & Settings Block
+### 2. 🛡️ Surgical Downloads Guard & Settings Block
 Locking down the OS without breaking the UX Explorer:
 - **Block Editing (Anti-Tampering):** Users can safely refresh the desktop without the "vanishing icons bug," but are strictly prohibited from creating folders, deleting, or pasting foreign files onto the Desktop. (The *Watchdog Engine* instantly deletes alien files in milliseconds and displays a visual reprimand).
 - **Settings Lock:** Severs access to the Windows *Settings* app & *Control Panel* to paralyze any tampering attempts.
@@ -73,7 +73,7 @@ The application will be packaged into `GCToxicShield.exe` (independent of system
 ## 🎮 Windows Defender & Anti-Cheat Compatibility
 This application enforces UI trapping that utilizes **Win32 API Global Keyboard Hooks** to intercept *Alt+Tab* and *Windows* key actions when a *Lockdown* punishment drops.
 
-- **Windows Defender:** Add the installation path (`C:\GC Net\GC Toxic Shield`) to Defender's exclusion/whitelist to prevent the Desktop Guard feature from being flagged as a *Trojan* or malicious system limiter.
+- **Windows Defender:** Add the installation path (`C:\GC Net\GC Toxic Shield`) to Defender's exclusion/whitelist to prevent the Downloads Guard feature from being flagged as a *Trojan* or malicious system limiter.
 - **Game Anti-Cheat (Vanguard):** Designed to act as passively as possible (only hooks during an active *lockdown*). Disable the hooking manually from the source if clients play strict kernel-level anti-cheat games like Valorant.
 
 ---

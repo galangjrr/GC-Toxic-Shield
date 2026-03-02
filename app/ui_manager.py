@@ -64,7 +64,7 @@ class AdminDashboard:
         self._auth = auth_service
         self._app_version = app_version
         self._github_repo = github_repo
-        self._desktop_guard = None  # Akan diset dari main.py
+        self._installer_guard = None  # Akan diset dari main.py
         self._on_close = on_close
         self._root: Optional[ctk.CTk] = None
         self._timers = []
@@ -1020,7 +1020,15 @@ class AdminDashboard:
         ctk.CTkSwitch(
             system_frame, text="Kunci Windows Settings & Control Panel", variable=self._settings_lock_var,
             onvalue="on", offvalue="off", command=self._on_settings_lock_toggle
-        ).pack(anchor="w", padx=15, pady=(10, 15))
+        ).pack(anchor="w", padx=15, pady=(10, 5))
+
+        # Installer Block (MSI & EXE)
+        is_installer_blocked = SystemService.is_installer_blocked()
+        self._installer_lock_var = ctk.StringVar(value="on" if is_installer_blocked else "off")
+        ctk.CTkSwitch(
+            system_frame, text="Blokir Instalasi Program (MSI & EXE)", variable=self._installer_lock_var,
+            onvalue="on", offvalue="off", command=self._on_installer_lock_toggle
+        ).pack(anchor="w", padx=15, pady=(5, 15))
 
         # Pembaruan Jaringan (Updater)
         update_frame = ctk.CTkFrame(left_col)
@@ -1288,6 +1296,26 @@ class AdminDashboard:
             )
             # Revert toggle
             self._settings_lock_var.set("off" if enable else "on")
+
+    def _on_installer_lock_toggle(self):
+        from app.system_service import SystemService
+        from tkinter import messagebox
+        enable = self._installer_lock_var.get() == "on"
+        success = SystemService.toggle_installer_block(enable)
+        if success:
+            state = "DIBLOKIR" if enable else "DIIZINKAN"
+            messagebox.showinfo(
+                "Keamanan Installer",
+                f"Instalasi program (MSI/EXE) saat ini: {state}"
+            )
+        else:
+            messagebox.showerror(
+                "Error",
+                "Gagal mengubah izin instalasi.\n"
+                "Pastikan aplikasi berjalan sebagai Administrator."
+            )
+            # Revert toggle
+            self._installer_lock_var.set("off" if enable else "on")
 
     def _reset_violations(self):
         if self._penalty_mgr: self._penalty_mgr.reset()
