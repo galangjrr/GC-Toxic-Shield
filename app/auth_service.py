@@ -100,6 +100,12 @@ class AuthService:
             "LockdownMessage": "Anda melanggar aturan berbahasa di GC Net.",
             "ServerIP": "",     # Kosong = NetworkClient nonaktif
             "ServerPort": 9000, # Port TCP server admin
+            "proximity_zones": [
+                {"id": "zone_1", "name": "Background Noise", "min_rms": 0.00, "max_rms": 0.05, "action": "IGNORE"},
+                {"id": "zone_2", "name": "User Voice", "min_rms": 0.06, "max_rms": 0.30, "action": "PROCESS"},
+                {"id": "zone_3", "name": "Distant Yell", "min_rms": 0.31, "max_rms": 0.45, "action": "IGNORE"},
+                {"id": "zone_4", "name": "User Yell", "min_rms": 0.46, "max_rms": 1.00, "action": "PROCESS"},
+            ],
             "sanction_list": [
                 {
                     "type": "WARNING",

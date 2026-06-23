@@ -26,6 +26,13 @@ if getattr(sys, 'frozen', False):
 LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# Ensure stdout can support UTF-8 (emojis) on Windows
+if sys.platform == "win32":
+    if sys.stdout:
+        sys.stdout.reconfigure(encoding='utf-8')
+    if sys.stderr:
+        sys.stderr.reconfigure(encoding='utf-8')
+
 logging.basicConfig(
     level=logging.INFO,
     format=LOG_FORMAT,
@@ -39,7 +46,7 @@ logger = logging.getLogger("GCToxicShield")
 
 # ── Constants ────────────────────────────────────────────────
 APP_NAME = "GC Toxic Shield"
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 BRAND = "GC Net Security Suite"
 GITHUB_REPO = "galangjrr/GC-Toxic-Shield"  # <-- Admin warns to replace this
 
@@ -233,6 +240,18 @@ def main():
         logger_svc = LoggerService()
         auth_service = AuthService()
 
+        # --- Init PySide6 Application ---
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import QTimer
+        
+        # Biarkan import tidak crash jika dipanggil dua kali (PyInstaller)
+        app = QApplication.instance()
+        if not app:
+            app = QApplication(sys.argv)
+            
+        app.setApplicationName(APP_NAME)
+        app.setApplicationVersion(APP_VERSION)
+
         # --- Init Dashboard ---
         dashboard = AdminDashboard(
             logger_service=logger_svc,
@@ -241,7 +260,8 @@ def main():
             app_version=APP_VERSION,
             github_repo=GITHUB_REPO,
         )
-        root = dashboard.build()
+        # root in PySide6 context is the QMainWindow instance
+        root = dashboard
         
         # --- Init Overlay & Penalty Manager ---
         overlay = LockdownOverlay(root, auth_service=auth_service)
@@ -301,14 +321,25 @@ def main():
             input_device_index=saved_device_idx,
             initial_gain=saved_gain
         )
+        engine.normalizer_callback = detector.normalize_stt_text
         dashboard._engine = engine
-        dashboard.sync_audio_ui()
+        dashboard.set_audio_engine(engine)
 
         # ── Start Services ──
         if SystemService.is_autostart_enabled():
             logger.info("✓ Auto-start ENABLED")
         
         logger_svc.start()
+
+        # ── Enforce toggle states from config on each startup ──
+        block_settings_cfg = auth_service.get_config("BlockSettings", False)
+        SystemService.toggle_windows_settings(bool(block_settings_cfg))
+        logger.info("BlockSettings enforced on startup: %s", block_settings_cfg)
+
+        block_installer_cfg = auth_service.get_config("BlockInstaller", False)
+        SystemService.toggle_installer_block(bool(block_installer_cfg))
+        logger.info("BlockInstaller enforced on startup: %s", block_installer_cfg)
+
         engine.start()
 
         # ── Start Network Client ──
@@ -319,60 +350,92 @@ def main():
 
         # ── Start Installer Guard (Real-time setup execution block) ──
         installer_guard = InstallerGuard(root=root, network_client=network_client)
-        installer_guard.enable()
+        installer_guard.set_block_installer(bool(block_installer_cfg))
+        installer_guard.set_block_settings(bool(block_settings_cfg))
+        if block_installer_cfg or block_settings_cfg:
+            installer_guard.enable()
         dashboard._installer_guard = installer_guard
+        if network_client:
+            network_client._installer_guard = installer_guard
 
         # ── Login Helper ──
 
-        def show_login_dialog(on_success, exit_mode=False, on_cancel=None):
+        def show_login_dialog_async(on_success, exit_mode=False, on_cancel=None):
             """Show login dialog on the main thread."""
             def _show():
+                # Di PySide6, parent adalah root (AdminDashboard QMainWindow)
                 LoginDialog(
-                    parent=root,
                     auth_service=auth_service,
                     on_success=on_success,
                     on_cancel=on_cancel,
                     exit_mode=exit_mode,
-                )
-            root.after(0, _show)
+                    parent=root
+                ).exec()
+            # QTimer.singleShot digunakan untuk melepas eksekusi ke main thread (mirip root.after)
+            QTimer.singleShot(0, _show)
 
         # ── System Tray Setup ──
+        
+        from PySide6.QtCore import QObject, Signal
 
-        def on_open_dashboard(icon, item):
-            """Tray → Show Dashboard: wajib login dulu."""
+        class TrayCommunicator(QObject):
+            sig_open_dashboard = Signal()
+            sig_restart_engine = Signal()
+            sig_exit_app = Signal()
+
+        tray_comm = TrayCommunicator()
+
+        def _handle_open_dashboard():
+            """Executes on MAIN thread"""
             auth_service.logout()
             def _on_login_success():
-                root.deiconify()
+                root.show()
+                root.raise_()
+                root.activateWindow()
                 logger.info("Dashboard opened after login")
-            show_login_dialog(on_success=_on_login_success)
+            show_login_dialog_async(on_success=_on_login_success)
 
-        def on_restart_engine(icon, item):
-            root.after(0, lambda: engine.stop())
-            root.after(1000, lambda: engine.start())
+        def _handle_restart_engine():
+            """Executes on MAIN thread"""
+            engine.stop()
+            QTimer.singleShot(1000, lambda: engine.start())
             logger.info("⟳ Engine restarted via Tray")
 
-        def on_exit_app(icon, item):
-            """Tray → Exit: wajib masukkan password."""
+        def _handle_exit_app():
+            """Executes on MAIN thread"""
             auth_service.logout()
             def _on_exit_success():
                 logger.info("Exit authenticated — shutting down")
-                icon.stop()
-                root.after(0, root.quit)
+                tray_icon.stop()
+                app.quit()
             def _on_exit_cancel():
                 logger.info("Exit cancelled by user")
-            def force_shutdown_hook():
-                logger.info("Main shutdown hook triggered...")
-                SystemService.force_shutdown(engine, logger_svc, overlay)
-            show_login_dialog(
+            show_login_dialog_async(
                 on_success=_on_exit_success,
                 exit_mode=True,
                 on_cancel=_on_exit_cancel,
             )
 
+        tray_comm.sig_open_dashboard.connect(_handle_open_dashboard)
+        tray_comm.sig_restart_engine.connect(_handle_restart_engine)
+        tray_comm.sig_exit_app.connect(_handle_exit_app)
+
+        def on_open_dashboard_tray(icon, item):
+            """Tray → Show Dashboard (Emits signal to main thread)"""
+            tray_comm.sig_open_dashboard.emit()
+
+        def on_restart_engine_tray(icon, item):
+            """Tray → Restart (Emits signal to main thread)"""
+            tray_comm.sig_restart_engine.emit()
+
+        def on_exit_app_tray(icon, item):
+            """Tray → Exit (Emits signal to main thread)"""
+            tray_comm.sig_exit_app.emit()
+
         tray_menu = pystray.Menu(
-            pystray.MenuItem("Settings...", on_open_dashboard, default=True),
-            pystray.MenuItem("Restart Engine", on_restart_engine),
-            pystray.MenuItem("Exit", on_exit_app),
+            pystray.MenuItem("Settings...", on_open_dashboard_tray, default=True),
+            pystray.MenuItem("Restart Engine", on_restart_engine_tray),
+            pystray.MenuItem("Exit", on_exit_app_tray),
         )
 
         try:
@@ -390,21 +453,26 @@ def main():
 
         # ── Window Management ──
 
-        def withdraw_window():
+        def withdraw_window(event=None):
             auth_service.logout()
-            root.withdraw()
+            root.hide() # PySide6 hide() bukannya withdraw()
             logger.info("Dashboard hidden — session cleared")
+            if event:
+                event.ignore()
 
-        root.protocol("WM_DELETE_WINDOW", withdraw_window)
+        # Implementasi closeEvent override kalau AdminDashboard adalah turunan class
+        # Karena kita patch `closeEvent` object langsung, ini bisa dilakukan di PySide6
+        root.closeEvent = withdraw_window
 
         # ── Silent Startup: Always start in Tray (no login dialog) ──
         # Auth is triggered only when user clicks "Show Dashboard" or "Exit"
         start_hidden = "--background" in sys.argv
         if start_hidden:
             logger.info("Starting in BACKGROUND mode (Tray only)")
+            root.hide()
         else:
             logger.info("Starting in FOREGROUND mode (Silent — Tray only)")
-        withdraw_window()
+            root.hide()
 
         # Run Tray in Thread
         threading.Thread(target=tray_icon.run, daemon=True).start()
@@ -417,7 +485,7 @@ def main():
         logger.info("━" * 50)
 
         # ── Main Loop ──
-        root.mainloop()
+        sys.exit(app.exec())
 
         # Cleanup
         installer_guard.disable()

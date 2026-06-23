@@ -64,6 +64,7 @@ os.makedirs(os.path.join(APPDATA_DIR, "logs"), exist_ok=True)
 # User-editable configurations & runtime logs
 LOGS_DIR = os.path.join(APPDATA_DIR, "logs")
 WORDLIST_PATH = os.path.join(APPDATA_DIR, "word_list.json")
+GUARD_CONFIG_PATH = os.path.join(APPDATA_DIR, "installer_guard_config.json")
 CSV_PATH = os.path.join(LOGS_DIR, "toxic_incidents.csv")
 CONFIG_PATH = os.path.join(APPDATA_DIR, "config.json")
 

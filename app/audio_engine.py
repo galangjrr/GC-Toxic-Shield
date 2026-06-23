@@ -17,6 +17,8 @@
 import threading
 import time
 import logging
+from typing import List, Dict, Any
+
 import numpy as np
 import ctypes
 
@@ -32,7 +34,6 @@ logger = logging.getLogger("GCToxicShield.AudioEngine")
 TARGET_SAMPLE_RATE = 16000
 FALLBACK_SAMPLE_RATES = [16000, 44100, 48000]
 RE_INIT_DELAY_SEC = 5
-CALIBRATION_DURATION = 1
 LISTEN_TIMEOUT = 10
 TARGET_RMS_DB = -20.0  # Target RMS level in dB for auto-normalization
 MIN_RMS_THRESHOLD = 0.001  # Below this → silence, don't normalize
@@ -166,6 +167,7 @@ class AudioEngine:
 
         self.language = language
         self.on_transcription = on_transcription
+        self.normalizer_callback = None  # Hook for standardizing transcript text
         self.input_device_index = input_device_index
         self.gain = initial_gain
 
@@ -177,12 +179,20 @@ class AudioEngine:
         self._device_changed = False  # Flag untuk device swap
         self._actual_sample_rate = TARGET_SAMPLE_RATE  # Resolved at open time
 
+        # ── Proximity Zone Filter (in-memory, hot-path safe) ──
+        self._proximity_zones: List[Dict[str, Any]] = [
+            {"id": "zone_1", "name": "Background Noise", "min_rms": 0.00, "max_rms": 0.05, "action": "IGNORE"},
+            {"id": "zone_2", "name": "User Voice", "min_rms": 0.06, "max_rms": 0.30, "action": "PROCESS"},
+            {"id": "zone_3", "name": "Distant Yell", "min_rms": 0.31, "max_rms": 0.45, "action": "IGNORE"},
+            {"id": "zone_4", "name": "User Yell", "min_rms": 0.46, "max_rms": 1.00, "action": "PROCESS"},
+        ]
+
         # ── Speech Recognition Setup ──
         self._recognizer = sr.Recognizer()
         self._recognizer.dynamic_energy_threshold = True
         self._recognizer.energy_threshold = 300
-        self._recognizer.pause_threshold = 1.0        # Tunggu 1.0s (lebih cepat) sebelum cut
-        self._recognizer.phrase_threshold = 0.1       # Terima phrase pendek (0.1s)
+        self._recognizer.pause_threshold = 2.5        # Tunggu 2.5s sebelum cut (cegah terpotong tengah kalimat)
+        self._recognizer.phrase_threshold = 0.3       # Minimum panjang frase
         self._recognizer.non_speaking_duration = 0.5  # Padding 0.5s (ekor kalimat)
 
         # ── Threads ──
@@ -267,11 +277,60 @@ class AudioEngine:
         self.input_device_index = index
         self._device_changed = True  # Signal listen loop to re-open mic
 
-    def set_gain(self, gain: float):
+    def set_gain(self, gain: float) -> None:
+        """Set the digital gain value, clamped to [0.0, 10.0].
+
+        Args:
+            gain: Desired gain multiplier.
+        """
         self.gain = max(0.0, min(gain, 10.0))
 
     def get_vu_level(self) -> float:
-        return min(1.0, self._current_rms * 5.0)
+        """Get VU meter level with perceptual scaling (0.0–1.0).
+
+        Uses an exponential curve to match human loudness perception.
+        Typical speech hits ~0.02–0.05 RMS → ~48–70% on the meter.
+
+        Returns:
+            Scaled VU level between 0.0 and 1.0.
+        """
+        if self._current_rms <= 0.0:
+            return 0.0
+        level = (self._current_rms * 15.0) ** 0.6
+        return float(max(0.0, min(1.0, level)))
+
+    def get_current_rms(self) -> float:
+        """Return the current raw RMS value (0.0–1.0) for UI display.
+
+        Unlike ``get_vu_level()`` which applies perceptual scaling,
+        this returns the actual linear RMS suitable for zone calibration.
+
+        Returns:
+            Current RMS float value between 0.0 and 1.0.
+        """
+        return float(self._current_rms)
+
+    @property
+    def proximity_zones(self) -> List[Dict[str, Any]]:
+        """Get the current proximity filter zones.
+
+        Returns:
+            List of zone dicts with keys: id, name, min_rms, max_rms, action.
+        """
+        return self._proximity_zones
+
+    @proximity_zones.setter
+    def proximity_zones(self, zones: List[Dict[str, Any]]) -> None:
+        """Set proximity filter zones (thread-safe via GIL).
+
+        The audio processing thread picks up the new list on its next
+        iteration — no lock required for atomic reference assignment.
+
+        Args:
+            zones: List of zone dictionaries.
+        """
+        self._proximity_zones = list(zones)  # Defensive copy
+        logger.info("Proximity zones updated (%d zones)", len(zones))
 
     # ================================================================
     # CORE: NON-STOP LISTEN LOOP (T11 + T12 Fixed)
@@ -308,16 +367,6 @@ class AudioEngine:
                     )
 
                 with mic as source:
-                    # Calibrate once per mic open
-                    logger.info("🎙 Calibrating (%ds)...", CALIBRATION_DURATION)
-                    self._recognizer.adjust_for_ambient_noise(
-                        source, duration=CALIBRATION_DURATION
-                    )
-                    logger.info(
-                        "✓ Calibrated at %dHz. Threshold: %.0f",
-                        actual_rate, self._recognizer.energy_threshold
-                    )
-
                     # Reset error counter on successful open
                     consecutive_errors = 0
 
@@ -435,8 +484,8 @@ class AudioEngine:
             self._recognizer = sr.Recognizer()
             self._recognizer.dynamic_energy_threshold = True
             self._recognizer.energy_threshold = 300
-            self._recognizer.pause_threshold = 1.0
-            self._recognizer.phrase_threshold = 0.1
+            self._recognizer.pause_threshold = 2.5
+            self._recognizer.phrase_threshold = 0.3
             self._recognizer.non_speaking_duration = 0.5
             logger.info("✓ Recognizer re-created")
         except Exception as e:
@@ -452,12 +501,20 @@ class AudioEngine:
             if self.gain != 1.0:
                 audio = self._apply_gain(audio)
 
+            # ── Proximity Zone Filter (pre-normalization RMS) ──
+            chunk_rms = self._calculate_rms(audio)
+            zone_action = self._evaluate_zone_action(chunk_rms)
+            if zone_action == "IGNORE":
+                logger.debug(
+                    "🔇 Zone filter: IGNORE (RMS=%.4f)", chunk_rms
+                )
+                return
+
             # ── Auto-Normalize (compensate weak mics) ──
             audio = self._normalize_audio(audio)
 
-            # ── Update RMS ──
+            # ── Update RMS & Store Chunk Metrics ──
             self._update_rms_from_audio(audio)
-
             # ── Google Speech Recognition ──
             text = self._recognizer.recognize_google(
                 audio, language=self.language
@@ -466,6 +523,13 @@ class AudioEngine:
 
             if text:
                 text = text.strip()
+                
+                if self.normalizer_callback:
+                    try:
+                        text = self.normalizer_callback(text)
+                    except Exception as e:
+                        logger.error("Normalizer callback error: %s", e)
+
                 logger.info("📝 Transcription: %s", text)
 
                 if self.on_transcription:
@@ -487,6 +551,57 @@ class AudioEngine:
     # ================================================================
     # HELPERS
     # ================================================================
+
+    def _calculate_rms(self, audio: "sr.AudioData") -> float:
+        """Calculate the Root Mean Square energy of an audio chunk.
+
+        Normalizes raw int16 samples to the [-1.0, 1.0] float range,
+        then computes ``sqrt(mean(samples²))``.  Result is a linear
+        energy value between 0.0 (silence) and 1.0 (full-scale).
+
+        Args:
+            audio: AudioData object containing raw PCM samples.
+
+        Returns:
+            RMS energy as a float in [0.0, 1.0].  Returns 0.0 on error.
+        """
+        try:
+            raw = np.frombuffer(
+                audio.get_raw_data(), dtype=np.int16
+            ).astype(np.float32) / 32768.0
+            return float(np.sqrt(np.mean(raw ** 2)))
+        except Exception as e:
+            logger.warning("RMS calculation failed: %s", e)
+            return 0.0
+
+    def _evaluate_zone_action(self, rms_value: float) -> str:
+        """Determine whether an audio chunk should be processed or ignored.
+
+        Iterates through the proximity zones list and returns the action
+        of the first matching zone.  If no zone matches, defaults to
+        ``IGNORE`` (fallback rule per specification).
+
+        This method is called in the audio processing hot path and
+        performs **no I/O** — it only reads the in-memory zones list.
+
+        Args:
+            rms_value: The RMS energy of the audio chunk (0.0–1.0).
+
+        Returns:
+            ``"PROCESS"`` if the chunk should be sent to STT,
+            ``"IGNORE"`` otherwise.
+        """
+        zones = self._proximity_zones  # Single read (GIL-safe snapshot)
+        for zone in zones:
+            try:
+                min_rms = float(zone.get("min_rms", 0.0))
+                max_rms = float(zone.get("max_rms", 0.0))
+                if min_rms <= rms_value <= max_rms:
+                    return zone.get("action", "IGNORE")
+            except (TypeError, ValueError) as e:
+                logger.warning("Invalid zone config: %s — skipping", e)
+                continue
+        return "IGNORE"  # Fallback: no matching zone
 
     def _apply_gain(self, audio: "sr.AudioData") -> "sr.AudioData":
         try:
@@ -589,7 +704,7 @@ class AudioEngine:
                     chunk = indata[:, 0]
                     if self.gain != 1.0:
                         chunk = chunk * self.gain
-                    rms = float(np.sqrt(np.mean(chunk ** 2)))
+                    rms = float(np.sqrt(np.mean(chunk**2)))
                     self._current_rms = self._current_rms * 0.5 + rms * 0.5
 
                 with sd.InputStream(
@@ -650,3 +765,4 @@ class AudioEngine:
                 logger.debug("VU meter: %dHz not supported", rate)
                 continue
         return None
+

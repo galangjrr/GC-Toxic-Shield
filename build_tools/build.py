@@ -40,7 +40,7 @@ def check_pyinstaller():
 
 def build():
     print("\n" + "━" * 60)
-    print("  GC Toxic Shield — Build Script (Google Speech Edition)")
+    print("  GC Toxic Shield — Build Script (Google Speech Edition) v1.0.9")
     print("━" * 60 + "\n")
 
     if not check_pyinstaller():
@@ -55,7 +55,6 @@ def build():
         "--manifest", MANIFEST_PATH,  # UAC admin prompt → keyboard hook stabil
 
         # ── Collect-all (UI + Tray + Pillow) ──
-        "--collect-all", "customtkinter",   # UI framework — wajib agar tema tidak pecah
         "--collect-all", "pillow",          # Fix 'No module named PIL' di .exe
         "--collect-all", "PIL",             # Explicitly collect PIL namespace
         "--collect-all", "pystray",         # System Tray — ikon + menu
@@ -71,8 +70,11 @@ def build():
         "--hidden-import", "PIL._tkinter_finder",
         "--hidden-import", "PIL._imagingtk",   # Ikon tray muncul sempurna
         "--hidden-import", "sounddevice",
-        "--hidden-import", "customtkinter",
         "--hidden-import", "numpy",            # Dibutuhkan untuk gain audio
+        "--hidden-import", "PySide6",
+        "--hidden-import", "PySide6.QtWidgets",
+        "--hidden-import", "PySide6.QtCore",
+        "--hidden-import", "PySide6.QtGui",
         "--hidden-import", "ctypes",
         "--hidden-import", "requests",
         "--hidden-import", "pkg_resources.extern",
@@ -90,6 +92,9 @@ def build():
         "--hidden-import", "app.auth_service",
         "--hidden-import", "app.login_dialog",
         "--hidden-import", "app.static_data",
+        "--hidden-import", "app.network_client",
+        "--hidden-import", "app.installer_guard",
+        "--hidden-import", "app.updater",
 
         # ── Exclude bloat (AI offline + lib tidak terpakai) ──
         "--exclude-module", "torch",
@@ -113,6 +118,8 @@ def build():
         "--exclude-module", "h5py",
         "--exclude-module", "sklearn",
         "--exclude-module", "tkinter.test",
+        "--exclude-module", "tkinter",
+        "--exclude-module", "customtkinter",
 
         # Icon
         "--icon", os.path.join(PROJECT_ROOT, "assets", "icon.ico"),

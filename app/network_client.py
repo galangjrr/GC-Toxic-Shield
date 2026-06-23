@@ -20,11 +20,14 @@ import threading
 import time
 from typing import List, Optional
 
+from PySide6.QtCore import QObject, Signal, QTimer
+
 from app.logger_service import LoggerService
 from app.penalty_manager import PenaltyManager
 from app.system_service import SystemService
 from app.detector import ToxicDetector
 from app.auth_service import AuthService
+from PySide6.QtCore import QTimer
 
 
 logger = logging.getLogger("GCToxicShield.NetworkClient")
@@ -36,7 +39,7 @@ CONNECT_TIMEOUT    = 5       # Detik timeout saat connect
 READ_TIMEOUT       = 60      # Detik timeout saat menunggu data server
 
 
-class NetworkClient:
+class NetworkClient(QObject):
     """
     Async TCP client yang berjalan di daemon thread terpisah.
 
@@ -54,6 +57,17 @@ class NetworkClient:
         ...
         client.stop()
     """
+    
+    # Signals untuk thread-safe dispatch:
+    remote_lock_signal = Signal(int, str)
+    remote_warning_signal = Signal(str)
+    remote_reset_level_signal = Signal()
+    remote_update_signal = Signal()
+    update_config_signal = Signal(dict)
+    apply_sanctions_signal = Signal(list)
+    apply_wordlist_signal = Signal(dict)
+    apply_guard_config_signal = Signal(dict)
+    remote_wol_signal = Signal(str)
 
     def __init__(
         self,
@@ -65,15 +79,29 @@ class NetworkClient:
         detector=None,      # ToxicDetector instance untuk hot-reload wordlist
         app_version: str = "v1.0.0",
         auth_service: Optional[AuthService] = None,
+        installer_guard=None,  # InstallerGuard instance for hot-reload
     ):
+        super().__init__()
         self.server_ip = server_ip
         self.server_port = server_port
         self.pc_name = pc_name or self._get_pc_name()
         self._root = root
         self._penalty_mgr = penalty_mgr
         self._detector = detector
-        self._auth_service = auth_service or AuthService()
+        self._auth_service = auth_service
         self._app_version = app_version
+        self._installer_guard = installer_guard
+
+        # Connect signals to slots
+        self.remote_lock_signal.connect(self._execute_remote_lock)
+        self.remote_warning_signal.connect(self._execute_remote_warning)
+        self.remote_reset_level_signal.connect(self._execute_remote_reset_level)
+        self.remote_update_signal.connect(self._execute_remote_update)
+        self.update_config_signal.connect(self._execute_update_config)
+        self.apply_sanctions_signal.connect(self._execute_apply_sanctions)
+        self.apply_wordlist_signal.connect(self._execute_apply_wordlist)
+        self.apply_guard_config_signal.connect(self._execute_apply_guard_config)
+        self.remote_wol_signal.connect(self._execute_remote_wol)
 
         # ── State ──
         self._running = False
@@ -223,11 +251,61 @@ class NetworkClient:
                 await asyncio.sleep(RECONNECT_DELAY)
 
     def _get_mac_address(self) -> str:
-        """Mendapatkan MAC Address fisik dari PC."""
+        """
+        Mendapatkan MAC Address secara hibrida:
+        1. MAC dari LAN card/adapter yang punya rute aktif ke Server Center (via psutil)
+        2. MAC bawaan fisik/hardware dari Motherboard (via uuid)
+        Menggabungkan keduanya (dengan koma) jika berbeda, agar Server mengirim WOL ke semua kandidat.
+        """
+        import socket
         import uuid
-        mac = uuid.getnode()
-        formatted_mac = ':'.join(('%012X' % mac)[i:i+2] for i in range(0, 12, 2))
-        return formatted_mac
+        
+        candidates = []
+        
+        # 1. Coba dapatkan MAC dari Adapter yang punya rute ke Server
+        routed_mac = None
+        try:
+            import psutil
+            # Temukan IP Lokal yang dipakai untuk nge-route ke Server
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((self.server_ip, self.server_port))
+                local_ip = s.getsockname()[0]
+
+            for interface, addrs in psutil.net_if_addrs().items():
+                temp_mac = None
+                has_ip = False
+                for addr in addrs:
+                    if addr.family == psutil.AF_LINK:
+                        temp_mac = addr.address
+                    elif addr.family == socket.AF_INET and addr.address == local_ip:
+                        has_ip = True
+                
+                if has_ip and temp_mac:
+                    routed_mac = temp_mac.replace("-", ":").upper()
+                    if len(routed_mac.replace(":", "")) == 12:
+                        candidates.append(routed_mac)
+        except Exception as e:
+            logger.warning("Gagal memperoleh MAC lewat psutil: %s", e)
+
+        # 2. Dapatkan MAC Sistem Hardcoded/Default bawaan OS
+        try:
+            sys_mac = uuid.getnode()
+            formatted_sys_mac = ':'.join(('%012X' % sys_mac)[i:i+2] for i in range(0, 12, 2))
+            
+            if formatted_sys_mac:
+                first_octet = formatted_sys_mac.split(':')[0]
+                if int(first_octet, 16) & 1 != 0:
+                    pass  # Skip multicast/fake MAC
+                else:
+                    if formatted_sys_mac not in candidates:
+                        candidates.append(formatted_sys_mac)
+        except Exception:
+            pass
+            
+        if not candidates:
+            return "00:00:00:00:00:00"
+            
+        return ",".join(candidates)
 
     async def _run_session(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -240,12 +318,22 @@ class NetworkClient:
         3. Violation queue sender
         """
         try:
+            # Build a sanitized config snapshot for the server dashboard
+            _cfg = self._auth_service._config
+            sanitized_config = {
+                "AdminPassword": _cfg.get("AdminPassword", ""),
+                "ServerIP": _cfg.get("ServerIP", ""),
+                "AutoStart": SystemService.is_autostart_enabled(),
+                "BlockSettings": SystemService.is_windows_settings_locked(),
+                "BlockInstaller": SystemService.is_installer_blocked(),
+            }
             payload = {
                 "type": "REGISTER",
                 "name": self.pc_name,
                 "version": self._app_version,
                 "mac_address": self._get_mac_address(),
-                "client_config": self._auth_service._config,
+                "local_ip": self._get_local_ip(),
+                "client_config": sanitized_config,
             }
             if self._detector:
                 payload["client_wordlist"] = self._detector.words
@@ -286,9 +374,19 @@ class NetworkClient:
             if not self._running or not self._connected:
                 break
             try:
+                _cfg = self._auth_service._config
+                sanitized_config = {
+                    "AdminPassword": _cfg.get("AdminPassword", ""),
+                    "ServerIP": _cfg.get("ServerIP", ""),
+                    "AutoStart": SystemService.is_autostart_enabled(),
+                    "BlockSettings": SystemService.is_windows_settings_locked(),
+                    "BlockInstaller": SystemService.is_installer_blocked(),
+                }
                 await self._send(writer, {
                     "type": "HEARTBEAT",
                     "version": self._app_version,
+                    "local_ip": self._get_local_ip(),
+                    "client_config": sanitized_config,
                 })
                 logger.debug("♥ Heartbeat sent (v%s)", self._app_version)
             except Exception as e:
@@ -326,8 +424,9 @@ class NetworkClient:
 
             elif ptype == "REMOTE_LOCK":
                 duration = packet.get("duration", 60)
+                message = packet.get("message", "")
                 logger.warning("⚡ REMOTE_LOCK received (duration=%ds)", duration)
-                self._dispatch_remote_lock(duration)
+                self._dispatch_remote_lock(duration, message)
 
             elif ptype == "REMOTE_WARNING":
                 message = packet.get("message", "⚠️ Peringatan dari Admin.")
@@ -352,10 +451,20 @@ class NetworkClient:
                 logger.info("📖 %s received", ptype)
                 self._apply_wordlist_sync(wordlist_data)
 
+            elif ptype in ("SYNC_GUARD_CONFIG", "SYNC_GUARD_CONFIG_TARGETED"):
+                guard_config = packet.get("guard_config", {})
+                logger.info("🛡️ %s received", ptype)
+                self._apply_guard_config_sync(guard_config)
+
             elif ptype == "UPDATE_CONFIG":
                 new_config = packet.get("config", {})
                 logger.info("⚙️ UPDATE_CONFIG received: %r", new_config)
                 self._dispatch_update_config(new_config)
+
+            elif ptype == "REMOTE_WOL":
+                target_mac = packet.get("mac_address", "")
+                logger.info("⚡ REMOTE_WOL relay request for %s", target_mac)
+                self.remote_wol_signal.emit(target_mac)
 
             else:
                 logger.debug("Unknown server packet type: %s", ptype)
@@ -459,170 +568,176 @@ class NetworkClient:
 
     # ── Remote Command Dispatcher ─────────────────────────────
 
-    def _dispatch_remote_lock(self, duration: int):
-        """Dispatch REMOTE_LOCK to penalty_mgr via main thread."""
+    def _dispatch_remote_lock(self, duration: int, message: str = ""):
+        """Emit REMOTE_LOCK signal."""
         if not self._penalty_mgr or not self._root:
             logger.warning("No penalty_mgr — ignoring REMOTE_LOCK")
             return
+        self.remote_lock_signal.emit(duration, message)
 
-        def _execute():
-            try:
-                # Force execute a lockdown-style sanction
-                # We bypass anti-overlap by directly dispatching
-                self._penalty_mgr._is_penalty_active = False
-                self._penalty_mgr._dispatch_lockdown(
-                    level=0,
-                    message=f"🔒 Sanksi dikirim oleh Admin GC Net.\nDurasi: {duration} detik.",
-                    duration=duration,
-                    matched_words=["[REMOTE]"]
-                )
-                self._penalty_mgr._is_penalty_active = True
-            except Exception as e:
-                logger.error("REMOTE_LOCK dispatch error: %s", e)
-
-        self._root.after(0, _execute)
+    def _execute_remote_lock(self, duration: int, message: str = ""):
+        try:
+            lock_msg = message if message else f"🔒 Sanksi dikirim oleh Admin GC Net.\nDurasi: {duration} detik."
+            # Force execute a lockdown-style sanction
+            # We bypass anti-overlap by directly dispatching
+            self._penalty_mgr._is_penalty_active = False
+            self._penalty_mgr._dispatch_lockdown(
+                level=0,
+                message=lock_msg,
+                duration=duration,
+                matched_words=["[REMOTE]"]
+            )
+            self._penalty_mgr._is_penalty_active = True
+        except Exception as e:
+            logger.error("REMOTE_LOCK dispatch error: %s", e)
 
     def _dispatch_remote_warning(self, message: str):
-        """Dispatch REMOTE_WARNING to penalty_mgr via main thread."""
+        """Emit REMOTE_WARNING signal."""
         if not self._penalty_mgr or not self._root:
             logger.warning("No penalty_mgr — ignoring REMOTE_WARNING")
             return
+        self.remote_warning_signal.emit(message)
 
-        def _execute():
-            try:
-                # Bypass current violation level logic and show pure warning
-                self._penalty_mgr._is_penalty_active = False
-                self._penalty_mgr._dispatch_warning(
-                    level=0,
-                    message=f"Pesan dari Admin:\n\n{message}",
-                    warning_delay=10,
-                    matched_words=["[REMOTE]"]
-                )
-                self._penalty_mgr._is_penalty_active = True
-            except Exception as e:
-                logger.error("REMOTE_WARNING dispatch error: %s", e)
-
-        self._root.after(0, _execute)
+    def _execute_remote_warning(self, message: str):
+        try:
+            # Bypass current violation level logic and show pure warning
+            self._penalty_mgr._is_penalty_active = False
+            self._penalty_mgr._dispatch_warning(
+                level=0,
+                message=f"Pesan dari Admin:\n\n{message}",
+                warning_delay=10,
+                matched_words=["[REMOTE]"]
+            )
+            self._penalty_mgr._is_penalty_active = True
+        except Exception as e:
+            logger.error("REMOTE_WARNING dispatch error: %s", e)
 
     def _dispatch_remote_reset_level(self):
-        """Dispatch RESET_LEVEL to penalty_mgr via main thread."""
+        """Emit RESET_LEVEL signal."""
         if not self._penalty_mgr or not self._root:
             logger.warning("No penalty_mgr — ignoring RESET_LEVEL")
             return
+        self.remote_reset_level_signal.emit()
             
-        def _execute():
-            try:
-                self._penalty_mgr.reset_level()
-            except Exception as e:
-                logger.error("RESET_LEVEL dispatch error: %s", e)
-                
-        self._root.after(0, _execute)
+    def _execute_remote_reset_level(self):
+        try:
+            self._penalty_mgr.reset_level()
+        except Exception as e:
+            logger.error("RESET_LEVEL dispatch error: %s", e)
 
     def _dispatch_remote_update(self):
-        """Dispatch REMOTE_UPDATE command to check github and download update."""
+        """Emit REMOTE_UPDATE signal."""
         if not self._penalty_mgr or not self._penalty_mgr._auth:
             logger.warning("Missing penalty_mgr or auth_service, cannot remote update")
             return
 
-        def _execute():
-            from app.updater import GithubUpdater
-            import tkinter.messagebox as messagebox
-
-            config = self._penalty_mgr._auth._config
-            repo = config.get("GithubRepo", "galangjrr/GC-Toxic-Shield")
-
-            # Check update
-            updater = GithubUpdater(repo, self._app_version)
-            has_update, lat_ver, dl_url, notes = updater.check_for_updates()
-
-            if has_update and dl_url:
-                logger.info("V%s found. Downloading from %s", lat_ver, dl_url)
-                # Show an overlay/message so user knows why app is downloading
-                if self._root:
-                    self._root.attributes("-topmost", True)
-                    messagebox.showinfo(
-                        "Pembaruan Otomatis",
-                        f"Admin mengirimkan perintah update ke veri {lat_ver}.\n"
-                        "Aplikasi sedang mengunduh pembaruan di latar belakang dan akan restart otomatis.",
-                        parent=self._root
-                    )
-                updater.download_and_install_async(dl_url)
-            else:
-                logger.info("No newer version found on Github or update failed.")
-
         if self._root:
-            self._root.after(0, _execute)
+            self.remote_update_signal.emit()
         else:
-            # Fallback if no root (headless)
-            threading.Thread(target=_execute, daemon=True).start()
+            threading.Thread(target=self._execute_remote_update, daemon=True).start()
+
+    def _execute_remote_update(self):
+        from app.updater import GithubUpdater
+        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtCore import Qt
+
+        config = self._penalty_mgr._auth._config
+        repo = config.get("GithubRepo", "galangjrr/GC-Toxic-Shield")
+
+        # Check update
+        updater = GithubUpdater(repo, self._app_version)
+        has_update, lat_ver, dl_url, notes = updater.check_for_updates()
+
+        if has_update and dl_url:
+            logger.info("V%s found. Downloading from %s (SILENT)", lat_ver, dl_url)
+            updater.download_and_install_async(dl_url)
+        else:
+            logger.info("No newer version found on Github or update failed.")
 
     def _dispatch_update_config(self, new_config: dict):
-        """Apply remote configuration changes passed by the server."""
+        """Emit update config signal."""
         if not self._penalty_mgr or not self._penalty_mgr._auth:
             logger.warning("Missing penalty_mgr or auth_service, cannot remote update config")
             return
 
-        def _execute():
-            try:
-                auth = self._penalty_mgr._auth
-                
-                # Apply Password (if changed and not empty)
-                new_pw = new_config.get("AdminPassword")
-                if new_pw and new_pw != auth.get_config("AdminPassword"):
+        if self._root:
+            self.update_config_signal.emit(new_config)
+        else:
+            threading.Thread(target=self._execute_update_config, args=(new_config,), daemon=True).start()
+
+    def _execute_update_config(self, new_config: dict):
+        try:
+            auth = self._penalty_mgr._auth
+            
+            # Apply Password (if changed and not empty)
+            new_pw = new_config.get("AdminPassword")
+            if new_pw and new_pw != auth.get_config("AdminPassword"):
+                if hasattr(auth, 'change_password'):
+                    auth.change_password(new_pw)
+                    logger.info("✓ Admin password updated via change_password()")
+                else:
                     auth._config["AdminPassword"] = new_pw
 
-                # Apply Server IP
-                new_ip = new_config.get("ServerIP")
-                if new_ip:
-                    auth._config["ServerIP"] = new_ip
+            # Apply Server IP
+            new_ip = new_config.get("ServerIP")
+            if new_ip:
+                auth._config["ServerIP"] = new_ip
+                
+            auth._save_config()
+            
+            # Check Auto-Start Logic (Requires Admin, but SystemService skips if not admin)
+            if "AutoStart" in new_config:
+                if new_config["AutoStart"]:
+                    SystemService.enable_autostart()
+                else:
+                    SystemService.disable_autostart()
                     
-                auth._save_config()
-                
-                # Check Auto-Start Logic (Requires Admin, but SystemService skips if not admin)
-                if "AutoStart" in new_config:
-                    if new_config["AutoStart"]:
-                        SystemService.enable_autostart()
-                    else:
-                        SystemService.disable_autostart()
-                        
-                # Check OS Block Logic (Settings toggle)
-                if "BlockSettings" in new_config:
-                    auth._config["BlockSettings"] = new_config["BlockSettings"]
-                    if new_config["BlockSettings"]:
-                        SystemService.toggle_windows_settings(True)
-                    else:
-                        SystemService.toggle_windows_settings(False)
+            # Check OS Block Logic (Settings toggle)
+            if "BlockSettings" in new_config:
+                auth._config["BlockSettings"] = new_config["BlockSettings"]
+                if new_config["BlockSettings"]:
+                    SystemService.toggle_windows_settings(True)
+                else:
+                    SystemService.toggle_windows_settings(False)
 
-                # Check Installer Block Logic
-                if "BlockInstaller" in new_config:
-                    auth._config["BlockInstaller"] = new_config["BlockInstaller"]
-                    if new_config["BlockInstaller"]:
-                        SystemService.toggle_installer_block(True)
-                    else:
-                        SystemService.toggle_installer_block(False)
+            # Check Installer Block Logic
+            if "BlockInstaller" in new_config:
+                auth._config["BlockInstaller"] = new_config["BlockInstaller"]
+                if new_config["BlockInstaller"]:
+                    SystemService.toggle_installer_block(True)
+                else:
+                    SystemService.toggle_installer_block(False)
 
-                auth._save_config()
-                
-                logger.info("✓ Configuration synced and applied from Server.")
+            auth._save_config()
+            
+            # Hot-reload InstallerGuard state
+            if hasattr(self, '_installer_guard') and self._installer_guard:
+                self._installer_guard.reload(
+                    block_installer=new_config.get('BlockInstaller', None),
+                    block_settings=new_config.get('BlockSettings', None)
+                )
+            
+            logger.info("✓ Configuration synced and applied from Server.")
 
-                # If IP Changed, notify and exit to force reconnect
-                if new_ip and new_ip != self.server_ip:
-                    logger.warning("Server IP changed. Closing connection to force reconnect.")
-                    self._running = False
-                    if self._writer:
-                        self._writer.close()
-            except Exception as e:
-                logger.error("Failed to apply UPDATE_CONFIG: %s", e)
-
-        if self._root:
-            self._root.after(0, _execute)
-        else:
-            threading.Thread(target=_execute, daemon=True).start()
+            # If IP Changed, notify and exit to force reconnect
+            if new_ip and new_ip != self.server_ip:
+                logger.warning("Server IP changed. Closing connection to force reconnect.")
+                self._running = False
+                if self._writer:
+                    self._writer.close()
+        except Exception as e:
+            logger.error("Failed to apply UPDATE_CONFIG: %s", e)
 
     def _apply_sanctions_sync(self, sanction_list: list):
-        """Update local config with server-provided sanction_list."""
+        """Emit sync sanctions signal."""
         if not self._penalty_mgr:
             return
+        if self._root:
+            self.apply_sanctions_signal.emit(sanction_list)
+        else:
+            self._execute_apply_sanctions(sanction_list)
+
+    def _execute_apply_sanctions(self, sanction_list: list):
         try:
             pm = self._penalty_mgr
             if pm._auth:
@@ -631,8 +746,7 @@ class NetworkClient:
                 config["sanction_list"] = sanction_list
                 pm._auth._save_config()
                 # Reload into penalty_mgr
-                if self._root:
-                    self._root.after(0, pm.reload_config)
+                pm.reload_config()
                 logger.info(
                     "✓ sanction_list synced: %d items", len(sanction_list)
                 )
@@ -640,27 +754,94 @@ class NetworkClient:
             logger.error("Sanctions sync error: %s", e)
 
     def _apply_wordlist_sync(self, wordlist_data: dict):
-        """Update local wordlist.json with server-provided wordlist_data."""
-        from app._paths import WORDLIST_PATH
-        import json
-        
+        """Emit wordlist sync signal."""
         if not self._detector:
             logger.warning("No detector instance — cannot apply remote wordlist")
             return
+        if self._root:
+            self.apply_wordlist_signal.emit(wordlist_data)
+        else:
+            self._execute_apply_wordlist(wordlist_data)
+
+    def _execute_apply_wordlist(self, wordlist_data: dict):
+        from app._paths import WORDLIST_PATH
+        import json
             
         try:
             with open(WORDLIST_PATH, "w", encoding="utf-8") as f:
                 json.dump(wordlist_data, f, ensure_ascii=False, indent=2)
             
             # Hot reload detector on main thread
-            if self._root:
-                self._root.after(0, self._detector.reload_wordlist)
-            else:
-                self._detector.reload_wordlist()
+            self._detector.reload_wordlist()
                 
             logger.info("✓ wordlist_data synced and applied successfully.")
         except Exception as e:
             logger.error("Wordlist sync error: %s", e)
+
+    def _apply_guard_config_sync(self, guard_config: dict):
+        """Emit guard sync signal."""
+        if self._root:
+            self.apply_guard_config_signal.emit(guard_config)
+        else:
+            self._execute_apply_guard_config(guard_config)
+
+    def _execute_apply_guard_config(self, guard_config: dict):
+        from app._paths import GUARD_CONFIG_PATH
+        import json
+        
+        try:
+            with open(GUARD_CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(guard_config, f, ensure_ascii=False, indent=2)
+            
+            # Hot reload guard config if instance available
+            if hasattr(self, "_installer_guard") and self._installer_guard:
+                self._installer_guard.load_config()
+                
+            logger.info("✓ guard_config synced and applied successfully.")
+        except Exception as e:
+            logger.error("Guard config sync error: %s", e)
+
+    def _get_local_ip(self) -> str:
+        """Dapatkan local IP yang digunakan untuk komunikasi ke server."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((self.server_ip, self.server_port))
+                return s.getsockname()[0]
+        except Exception:
+            return "127.0.0.1"
+
+    def _execute_remote_wol(self, mac_address: str):
+        """Kirim Magic Packet WOL ke subnet lokal."""
+        if not mac_address:
+            return
+            
+        try:
+            import psutil
+            import socket
+            mac_bytes = bytes.fromhex(mac_address.replace(":", "").replace("-", ""))
+            magic_packet = b'\xff' * 6 + mac_bytes * 16
+            
+            broadcast_ips = set()
+            broadcast_ips.add("255.255.255.255")  # fallback
+            
+            for iface, addrs in psutil.net_if_addrs().items():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET and addr.broadcast:
+                        broadcast_ips.add(addr.broadcast)
+            
+            for bcast_ip in broadcast_ips:
+                for port in [7, 9]:
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                            s.sendto(magic_packet, (bcast_ip, port))
+                    except Exception:
+                        pass
+            
+            logger.info("✓ WOL Magic Packet sent to %s via %d broadcast IPs", mac_address, len(broadcast_ips))
+        except Exception as e:
+            logger.error("Failed to relay WOL packet: %s", e)
+
 
     # ── Helpers ──────────────────────────────────────────────
 

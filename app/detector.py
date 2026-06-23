@@ -77,6 +77,9 @@ class ToxicDetector:
         self._wordlist_path = wordlist_path or DEFAULT_WORDLIST_PATH
         self._toxic_words: List[str] = []
         self._patterns: List[tuple] = []  # [(word, compiled_regex), ...]
+        self._allowed_words: List[str] = []
+        self._allowed_patterns: List[tuple] = []
+        self._context_exclusions: dict = {}
 
         self._load_wordlist()
 
@@ -104,17 +107,35 @@ class ToxicDetector:
             )
 
         # ── T12: Pre-processing Pipeline ──
-        # 1. Normalisasi (lowercase, repeat chars)
-        cleaned_text = self._normalize_text(text)
+        # All of this is now handled by normalize_stt_text which can be called externally too.
+        mapped_text = self.normalize_stt_text(text)
 
-        # 2. Phonetic Mapping (fix misheard words)
-        mapped_text = self._apply_phonetic_mapping(cleaned_text)
+        # 3. Remove allowed words mapping
+        for word, pattern in self._allowed_patterns:
+            mapped_text = pattern.sub("", mapped_text)
 
         matched = []
 
         for word, pattern in self._patterns:
             if pattern.search(mapped_text):
                 matched.append(word)
+
+        # ── Context Exclusion: remove false positives ──
+        # If a matched toxic word has context exclusion words and
+        # ANY of those words appear in the full text, cancel the match.
+        if matched and self._context_exclusions:
+            filtered = []
+            text_lower = mapped_text.lower()
+            for word in matched:
+                exclusions = self._context_exclusions.get(word, [])
+                if exclusions and any(ctx in text_lower for ctx in exclusions):
+                    logger.debug(
+                        "Context exclusion: '%s' cancelled (context word found in text)",
+                        word
+                    )
+                    continue
+                filtered.append(word)
+            matched = filtered
 
         is_toxic = len(matched) > 0
 
@@ -141,6 +162,16 @@ class ToxicDetector:
         """
         self._load_wordlist()
         logger.info("⟳ Wordlist reloaded (%d words)", len(self._toxic_words))
+
+    def normalize_stt_text(self, text: str) -> str:
+        """
+        Terapkan normalisasi (lowercase, hapus char berulang) 
+        dan pemetaan fonetik (salah dengar API) agar teks 
+        bisa distandardisasi secara global (UI, Log, Detektor).
+        """
+        cleaned_text = self._normalize_text(text)
+        mapped_text = self._apply_phonetic_mapping(cleaned_text)
+        return mapped_text
 
     @property
     def word_count(self) -> int:
@@ -180,17 +211,29 @@ class ToxicDetector:
             # Support format lama (list) dan baru (dict)
             if isinstance(data, list):
                 raw_words = data
+                raw_allowed_words = []
             elif isinstance(data, dict):
                 raw_words = data.get("toxic_words", [])
                 self._phonetic_map = data.get("phonetic_mapping", {})
+                raw_allowed_words = data.get("allowed_words", [])
+                raw_context_exclusions = data.get("context_exclusions", {})
             else:
                 logger.error("✗ Wordlist format unknown (must be list or dict)")
                 return
 
             # Normalisasi: lowercase, strip, hapus duplikat, hapus empty
+            flattened_words = []
+            if isinstance(raw_words, dict):
+                for key, aliases in raw_words.items():
+                    flattened_words.append(key)
+                    if isinstance(aliases, list):
+                        flattened_words.extend(aliases)
+            elif isinstance(raw_words, list):
+                flattened_words = raw_words
+
             unique_words = list(set(
                 word.lower().strip()
-                for word in raw_words
+                for word in flattened_words
                 if isinstance(word, str) and word.strip()
             ))
 
@@ -209,10 +252,41 @@ class ToxicDetector:
             self._toxic_words = unique_words
             self._patterns = compiled
 
+            # Compile allowed words
+            allowed_compiled = []
+            unique_allowed = list(set(
+                word.lower().strip()
+                for word in raw_allowed_words
+                if isinstance(word, str) and word.strip()
+            ))
+            for word in unique_allowed:
+                try:
+                    pattern = re.compile(
+                        r'\b' + re.escape(word) + r'\b',
+                        re.IGNORECASE
+                    )
+                    allowed_compiled.append((word, pattern))
+                except re.error as e:
+                    logger.warning("Invalid regex for allowed word '%s': %s", word, e)
+            
+            self._allowed_words = unique_allowed
+            self._allowed_patterns = allowed_compiled
+
+            # Load context exclusions (normalize to lowercase)
+            self._context_exclusions = {}
+            if isinstance(raw_context_exclusions, dict):
+                for toxic_word, ctx_words in raw_context_exclusions.items():
+                    if isinstance(ctx_words, list):
+                        self._context_exclusions[toxic_word.lower().strip()] = [
+                            w.lower().strip() for w in ctx_words if isinstance(w, str) and w.strip()
+                        ]
+
             logger.info(
-                "✓ Wordlist loaded: %d toxic words, %d mappings from %s",
+                "✓ Wordlist loaded: %d toxic words, %d mapping, %d allowed, %d context_exclusions from %s",
                 len(self._toxic_words),
                 len(self._phonetic_map),
+                len(self._allowed_words),
+                len(self._context_exclusions),
                 os.path.basename(self._wordlist_path)
             )
 
@@ -221,12 +295,18 @@ class ToxicDetector:
             self._toxic_words = []
             self._patterns = []
             self._phonetic_map = {}
+            self._allowed_words = []
+            self._allowed_patterns = []
+            self._context_exclusions = {}
 
         except Exception as e:
             logger.error("✗ Failed to load wordlist: %s", e)
             self._toxic_words = []
             self._patterns = []
             self._phonetic_map = {}
+            self._allowed_words = []
+            self._allowed_patterns = []
+            self._context_exclusions = {}
 
     def _normalize_text(self, text: str) -> str:
         """
@@ -248,26 +328,13 @@ class ToxicDetector:
         """
         Mengganti kata salah dengar (misheard) dengan kata toxic asli.
         Contoh: "peeler" -> "peler", "fill" -> "itil"
+        (Diambil dari word_list.json → phonetic_mapping)
         """
-        # T13: Hardcoded aliases verification
-        # Ensure peeler/peller -> peler is always present
-        hardcoded_map = {
-            "peeler": "peler",
-            "peller": "peler"
-        }
-        
-        # Merge with loaded map (priority to loaded map if exists, or hardcoded? 
-        # User said "map automatically", implying these MUST work. 
-        # I'll use hardcoded as fallback or override. Let's treat them as default.)
-        
         words = text.split()
         new_words = []
         for w in words:
             w_lower = w.lower()
-            # Priority: 1. Hardcoded, 2. JSON Map
-            if w_lower in hardcoded_map:
-                new_words.append(hardcoded_map[w_lower])
-            elif w_lower in self._phonetic_map:
+            if w_lower in self._phonetic_map:
                 new_words.append(self._phonetic_map[w_lower])
             else:
                 new_words.append(w)

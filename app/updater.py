@@ -7,6 +7,7 @@ import urllib.request
 import urllib.error
 import threading
 import subprocess
+import shutil
 import logging
 
 logger = logging.getLogger("GCToxicShield.Updater")
@@ -135,25 +136,51 @@ class GithubUpdater:
         exe_name = os.path.basename(sys.argv[0])
         if not exe_name.endswith(".exe"):
             exe_name = "GC Toxic Shield.exe"
-            
-        bat_path = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "gctoxic_update.bat")
-        
-        # Script bat:
-        # PING sbg sleep 4 dtk -> KILL exe lama -> PowerShell ekstrak ZIP -> Cek stuktur folder zip -> Copy -> START
+
+        temp_dir = os.environ.get("TEMP", "C:\\Temp")
+        extract_dir = os.path.join(temp_dir, "GCT_Update_Ext")
+        bat_path = os.path.join(temp_dir, "gctoxic_update.bat")
+
+        # 1. Extract ZIP using Python's zipfile (avoids PowerShell dependency)
+        try:
+            if os.path.exists(extract_dir):
+                shutil.rmtree(extract_dir, ignore_errors=True)
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(extract_dir)
+            logger.info("ZIP extracted to %s", extract_dir)
+        except Exception as e:
+            logger.error("Failed to extract update ZIP: %s", e)
+            return
+
+        # 2. Find the exe inside extracted folder to determine source_dir
+        source_dir = extract_dir
+        for root, dirs, files in os.walk(extract_dir):
+            if exe_name in files:
+                source_dir = root
+                break
+
+        # 3. Generate batch script with retry loop
         bat_content = f"""@echo off
-echo Mengkonfigurasi pembaruan GC Toxic Shield...
-echo JANGAN TUTUP JENDELA INI. Aplikasi akan otomatis terbuka.
 ping 127.0.0.1 -n 4 > nul
 taskkill /F /IM "{exe_name}" /T > nul 2>&1
 ping 127.0.0.1 -n 2 > nul
 
-echo Mengekstrak rancangan terbaru...
-powershell -WindowStyle Hidden -NoProfile -Command "$tempExt = Join-Path $env:TEMP 'GCT_Update_Ext'; if (Test-Path $tempExt) {{ Remove-Item -Recurse -Force $tempExt }}; Expand-Archive -Path '{zip_path}' -DestinationPath $tempExt -Force; $exePath = Get-ChildItem -Path $tempExt -Filter '{exe_name}' -Recurse | Select-Object -First 1; if ($exePath) {{ $sourceDir = $exePath.Directory.FullName; Copy-Item -Path \\"$sourceDir\\*\\" -Destination '{app_dir}' -Recurse -Force }}; if (Test-Path $tempExt) {{ Remove-Item -Recurse -Force $tempExt }}"
+set RETRY=0
+:COPY_RETRY
+xcopy "{source_dir}\\*" "{app_dir}\\" /Y /E /H /R /Q > nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+  set /A RETRY+=1
+  if %RETRY% LSS 5 (
+    ping 127.0.0.1 -n 3 > nul
+    goto COPY_RETRY
+  )
+)
 
-echo Memulai ulang aplikasi GC Toxic Shield...
-start "" "{os.path.join(app_dir, exe_name)}"
+if exist "{extract_dir}" rmdir /S /Q "{extract_dir}"
 
-del "{zip_path}"
+start /B "" "{os.path.join(app_dir, exe_name)}" --background
+
+del "{zip_path}" > nul 2>&1
 del "%~f0"
 """
         with open(bat_path, "w") as f:
@@ -162,7 +189,7 @@ del "%~f0"
         # Spawn execution in background without locking current process
         subprocess.Popen(
             [bat_path], 
-            creationflags=subprocess.CREATE_NEW_CONSOLE
+            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
         )
         
         # Self-destruct thread to allow the batch script to kill it safely and replace files
@@ -172,3 +199,4 @@ del "%~f0"
             os._exit(0)
             
         threading.Thread(target=_exit_app, daemon=True).start()
+

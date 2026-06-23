@@ -22,6 +22,7 @@ import threading
 import time
 import logging
 from typing import Optional, Callable
+from PySide6.QtCore import QObject, Signal
 
 logger = logging.getLogger("GCToxicShield.PenaltyManager")
 
@@ -88,7 +89,7 @@ DEFAULT_SANCTION_LIST = [
 ]
 
 
-class PenaltyManager:
+class PenaltyManager(QObject):
     """
     Config-driven sanction executor.
 
@@ -100,6 +101,9 @@ class PenaltyManager:
     5. is_penalty_active = True selama sanksi berlangsung
     6. Auto-reset setelah PenaltyResetMinutes tanpa pelanggaran
     """
+    
+    show_warning_signal = Signal(int, str, int, list)
+    show_lockdown_signal = Signal(int, str, int, list)
 
     def __init__(
         self,
@@ -107,11 +111,16 @@ class PenaltyManager:
         auth_service=None,
         on_violation: Optional[Callable] = None,
     ):
+        super().__init__()
         self._overlay = overlay
         self._auth = auth_service
         self._on_violation = on_violation
         self.network_client = None  # Set externally after NetworkClient init
         self.on_sync_callback: Optional[Callable] = None  # Hook for UI to refresh on broadcast
+        
+        # Connect signals
+        self.show_warning_signal.connect(self._execute_dispatch_warning)
+        self.show_lockdown_signal.connect(self._execute_dispatch_lockdown)
 
         # ── State ──
         self._current_level = 0
@@ -251,34 +260,37 @@ class PenaltyManager:
     # ================================================================
 
     def _dispatch_warning(self, level, message, warning_delay, matched_words):
-        """Dispatch WarningBox to main thread."""
+        """Emit WARNING signal."""
+        self.show_warning_signal.emit(level, message, warning_delay, matched_words or [])
+        
+    def _execute_dispatch_warning(self, level, message, warning_delay, matched_words):
         from app.overlay import WarningBox
 
-        self._overlay._root.after(
-            0,
-            lambda: WarningBox(
-                root=self._overlay._root,
-                level=level + 1,  # Display as 1-indexed
-                matched_words=matched_words or [],
-                auth_service=self._auth,
-                warning_delay=warning_delay,
-                message=message,
-                on_dismiss=self._on_penalty_done,
-            ),
+        self._current_warning_box = WarningBox(
+            parent=self._overlay._parent,
+            level=level + 1,  # Display as 1-indexed
+            matched_words=matched_words or [],
+            auth_service=self._auth,
+            warning_delay=warning_delay,
+            message=message,
+            on_dismiss=self._on_warning_done,
         )
 
+    def _on_warning_done(self):
+        self._current_warning_box = None
+        self._on_penalty_done()
+
     def _dispatch_lockdown(self, level, message, duration, matched_words):
-        """Dispatch LockdownOverlay to main thread."""
-        # Update lockdown message in overlay config
-        self._overlay._root.after(
-            0,
-            lambda: self._overlay.show(
-                level=level + 1,  # Display as 1-indexed
-                matched_words=matched_words,
-                duration=duration,
-                on_dismiss=self._on_penalty_done,
-                on_unlock=None,  # Do not reset violation count on manual override
-            ),
+        """Emit LOCKDOWN signal."""
+        self.show_lockdown_signal.emit(level, message, duration, matched_words or [])
+        
+    def _execute_dispatch_lockdown(self, level, message, duration, matched_words):
+        self._overlay.show(
+            level=level + 1,  # Display as 1-indexed
+            matched_words=matched_words,
+            duration=duration,
+            on_dismiss=self._on_penalty_done,
+            on_unlock=None,  # Do not reset violation count on manual override
         )
 
     # ================================================================

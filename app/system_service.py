@@ -151,14 +151,18 @@ class SystemService:
     @staticmethod
     def toggle_windows_settings(enable_lock: bool) -> bool:
         """
-        Lock/unlock Windows Settings & Control Panel via Registry.
+        Registry cleanup for Windows Settings & Control Panel.
+
+        ALWAYS deletes NoControlPanel from the registry (cleanup).
+        The actual Settings/Control Panel blocking is now handled by
+        InstallerGuard at the process level.
 
         Target: HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer
         Value:  NoControlPanel (REG_DWORD)
 
         Args:
-            enable_lock: True  → set NoControlPanel=1 (Settings blocked)
-                         False → delete NoControlPanel   (Settings accessible)
+            enable_lock: Kept for backward compat. Both True and False
+                         perform the same cleanup (delete NoControlPanel).
 
         Returns:
             True if operation succeeded.
@@ -166,30 +170,37 @@ class SystemService:
         try:
             import winreg
 
-            if enable_lock:
-                # Create key if it doesn't exist, then set value
-                key = winreg.CreateKeyEx(
+            # Always clean up the registry value (both enable and disable)
+            try:
+                key = winreg.OpenKey(
                     winreg.HKEY_CURRENT_USER,
                     SystemService.POLICIES_EXPLORER_PATH,
                     0,
                     winreg.KEY_SET_VALUE,
                 )
-                winreg.SetValueEx(key, "NoControlPanel", 0, winreg.REG_DWORD, 1)
+                winreg.DeleteValue(key, "NoControlPanel")
                 winreg.CloseKey(key)
-                logger.info("✓ Windows Settings LOCKED (NoControlPanel=1)")
-            else:
-                try:
-                    key = winreg.OpenKey(
-                        winreg.HKEY_CURRENT_USER,
-                        SystemService.POLICIES_EXPLORER_PATH,
-                        0,
-                        winreg.KEY_SET_VALUE,
-                    )
-                    winreg.DeleteValue(key, "NoControlPanel")
-                    winreg.CloseKey(key)
-                    logger.info("✓ Windows Settings UNLOCKED (NoControlPanel removed)")
-                except FileNotFoundError:
-                    logger.info("NoControlPanel was not set — already unlocked")
+                logger.info("✓ Registry cleanup: NoControlPanel removed (enforcement via InstallerGuard)")
+            except FileNotFoundError:
+                logger.info("NoControlPanel was not set — registry already clean")
+
+            # Broadcast WM_SETTINGCHANGE to all windows immediately after registry changes
+            import ctypes
+            HWND_BROADCAST = 0xFFFF
+            WM_SETTINGCHANGE = 0x001A
+            SMTO_ABORTIFHUNG = 0x0002
+            try:
+                ctypes.windll.user32.SendMessageTimeoutW(
+                    HWND_BROADCAST,
+                    WM_SETTINGCHANGE,
+                    0,
+                    "Policy",
+                    SMTO_ABORTIFHUNG,
+                    5000,
+                    None
+                )
+            except Exception as e:
+                logger.warning("Failed to broadcast WM_SETTINGCHANGE: %s", e)
 
             return True
 
@@ -235,93 +246,94 @@ class SystemService:
     @staticmethod
     def toggle_installer_block(enable_block: bool) -> bool:
         """
-        Blokir instalasi MSI (DisableMSI) dan setup (DisallowRun) via Registry.
+        Registry cleanup for installer blocking (MSI & EXE).
+
+        ALWAYS deletes DisableMSI from HKLM and DisallowRun + its subkey
+        from HKCU, regardless of the enable_block parameter.
+        The actual installer blocking is now handled by InstallerGuard's
+        WMI/Window monitoring.
 
         Target: HKLM & HKCU Policies
         Args:
-            enable_block: True  → Blokir installer
-                          False → Izinkan installer
+            enable_block: Kept for backward compat. Both True and False
+                          perform the same cleanup (delete registry values).
         Returns: True jika berhasil.
         """
         try:
             import winreg
 
-            if enable_block:
-                # Blokir MSI (DisableMSI = 2) untuk semua user
-                key_msi = winreg.CreateKeyEx(
+            # Always clean up: delete DisableMSI from HKLM
+            try:
+                key_msi = winreg.OpenKey(
                     winreg.HKEY_LOCAL_MACHINE,
                     SystemService.POLICIES_INSTALLER_PATH,
                     0,
                     winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
                 )
-                winreg.SetValueEx(key_msi, "DisableMSI", 0, winreg.REG_DWORD, 2)
+                winreg.DeleteValue(key_msi, "DisableMSI")
                 winreg.CloseKey(key_msi)
+                logger.info("✓ Registry cleanup: DisableMSI removed")
+            except FileNotFoundError:
+                logger.info("DisableMSI was not set — registry already clean")
 
-                # Blokir Installer EXE umum (setup.exe, install.exe) via DisallowRun
-                key_expl = winreg.CreateKeyEx(
+            # Always clean up: delete DisallowRun subkey from HKCU
+            try:
+                disallow_path = SystemService.POLICIES_EXPLORER_PATH + r"\DisallowRun"
+                key_disallow = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    disallow_path,
+                    0,
+                    winreg.KEY_ALL_ACCESS,
+                )
+                # Enumerate and delete all values in the subkey
+                try:
+                    while True:
+                        name, _, _ = winreg.EnumValue(key_disallow, 0)
+                        winreg.DeleteValue(key_disallow, name)
+                except OSError:
+                    pass
+                winreg.CloseKey(key_disallow)
+                # Delete the subkey itself
+                winreg.DeleteKey(
+                    winreg.HKEY_CURRENT_USER,
+                    disallow_path,
+                )
+            except FileNotFoundError:
+                pass
+
+            # Always clean up: delete DisallowRun value from Explorer policies
+            try:
+                key_expl = winreg.OpenKey(
                     winreg.HKEY_CURRENT_USER,
                     SystemService.POLICIES_EXPLORER_PATH,
                     0,
                     winreg.KEY_SET_VALUE,
                 )
-                winreg.SetValueEx(key_expl, "DisallowRun", 0, winreg.REG_DWORD, 1)
+                winreg.DeleteValue(key_expl, "DisallowRun")
                 winreg.CloseKey(key_expl)
+                logger.info("✓ Registry cleanup: DisallowRun removed")
+            except FileNotFoundError:
+                logger.info("DisallowRun was not set — registry already clean")
 
-                key_disallow = winreg.CreateKeyEx(
-                    winreg.HKEY_CURRENT_USER,
-                    SystemService.POLICIES_EXPLORER_PATH + r"\DisallowRun",
+            logger.info("✓ Installer registry cleanup complete (enforcement via InstallerGuard)")
+            
+            # Broadcast WM_SETTINGCHANGE to all windows immediately after registry changes
+            import ctypes
+            HWND_BROADCAST = 0xFFFF
+            WM_SETTINGCHANGE = 0x001A
+            SMTO_ABORTIFHUNG = 0x0002
+            try:
+                ctypes.windll.user32.SendMessageTimeoutW(
+                    HWND_BROADCAST,
+                    WM_SETTINGCHANGE,
                     0,
-                    winreg.KEY_SET_VALUE,
+                    "Policy",
+                    SMTO_ABORTIFHUNG,
+                    5000,
+                    None
                 )
-                
-                # Daftar nama umum installer offline & online (adware vectors)
-                blocked_executables = [
-                    "setup.exe",
-                    "install.exe",
-                    "installer.exe",
-                    "avast_free_antivirus_setup_online.exe",
-                    "chromesetup.exe",        # Google Chrome Online Installer
-                    "operasetup.exe",         # Opera Browser (Sering bawa Avast)
-                    "operagxsetup.exe",       # Opera GX
-                    "ccsetup.exe",            # CCleaner (Sering bawa Avast)
-                    "avg_antivirus_free_setup.exe", # AVG (Satu perusahaan dengan Avast)
-                    "smadav-updater.exe"      # Smadav Updater (opsional)
-                ]
-                
-                for idx, exe_name in enumerate(blocked_executables, start=1):
-                    winreg.SetValueEx(key_disallow, str(idx), 0, winreg.REG_SZ, exe_name)
-                    
-                winreg.CloseKey(key_disallow)
-
-                logger.info("✓ Installer Block ENABLED (MSI & EXE restricted)")
-            else:
-                # Buka kunci MSI (DisableMSI = 0 atau hapus key)
-                try:
-                    key_msi = winreg.OpenKey(
-                        winreg.HKEY_LOCAL_MACHINE,
-                        SystemService.POLICIES_INSTALLER_PATH,
-                        0,
-                        winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
-                    )
-                    winreg.DeleteValue(key_msi, "DisableMSI")
-                    winreg.CloseKey(key_msi)
-                except FileNotFoundError:
-                    pass
-
-                # Buka kunci EXE (Hapus DisallowRun)
-                try:
-                    key_expl = winreg.OpenKey(
-                        winreg.HKEY_CURRENT_USER,
-                        SystemService.POLICIES_EXPLORER_PATH,
-                        0,
-                        winreg.KEY_SET_VALUE,
-                    )
-                    winreg.DeleteValue(key_expl, "DisallowRun")
-                    winreg.CloseKey(key_expl)
-                except FileNotFoundError:
-                    pass
-
-                logger.info("✓ Installer Block DISABLED (MSI & EXE allowed)")
+            except Exception as e:
+                logger.warning("Failed to broadcast WM_SETTINGCHANGE for Installer: %s", e)
 
             return True
 

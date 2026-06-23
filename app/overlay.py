@@ -1,5 +1,5 @@
 # =============================================================
-# GC Toxic Shield — Tiered Warning & Lockdown Overlay
+# GC Toxic Shield — Tiered Warning & Lockdown Overlay (PySide6)
 # =============================================================
 # Sistem penindakan:
 #   Level 1-2 (mod 3): WarningBox (pesan + tombol delayed)
@@ -15,17 +15,14 @@
 # Referensi: ConfigManager.cs & StaticData.cs
 # =============================================================
 
-import threading
 import time
 import logging
-import tkinter as tk
 from typing import Optional, Callable
-
-try:
-    import customtkinter as ctk
-except ImportError:
-    ctk = None
-
+from PySide6.QtWidgets import (
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QLineEdit, QApplication
+)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QColor
 from app import static_data
 
 # ── Logging ────────────────────────────────────────────────────
@@ -36,7 +33,7 @@ logger = logging.getLogger("GCToxicShield.Overlay")
 # WARNING BOX (Level 1-2 dalam siklus 3)
 # ================================================================
 
-class WarningBox:
+class WarningBox(QDialog):
     """
     Jendela peringatan yang muncul di tengah layar.
     Tombol 'Saya Mengerti' di-disable selama WarningDelaySeconds.
@@ -44,256 +41,261 @@ class WarningBox:
 
     def __init__(
         self,
-        root: tk.Tk,
         level: int,
         matched_words: list,
         auth_service=None,
         warning_delay: int = 5,
         message: str = None,
         on_dismiss: Callable = None,
+        parent=None,
     ):
-        self._root = root
+        super().__init__(parent)
         self._auth = auth_service
         self._delay = warning_delay
         self._custom_message = message
-        self._countdown_job = None
         self._on_dismiss = on_dismiss
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.timeout.connect(self._timer_tick)
+        self._remaining = 0
 
-        # ── Build Window ──
-        self._win = ctk.CTkToplevel(root) if ctk else tk.Toplevel(root)
-        self._win.title("⚠️ Peringatan — GC Toxic Shield")
-        self._win.geometry("520x420")
-        self._win.resizable(False, False)
-        self._win.attributes("-topmost", True)
-        self._win.transient(root)
+        # Window Setup
+        self.setWindowTitle("⚠️ Peringatan — GC Toxic Shield")
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFixedSize(560, 480)
 
         # Center on screen
-        self._win.update_idletasks()
-        x = (self._win.winfo_screenwidth() // 2) - 260
-        y = (self._win.winfo_screenheight() // 2) - 210
-        self._win.geometry(f"520x420+{x}+{y}")
-
-        # Secure close
-        self._win.protocol("WM_DELETE_WINDOW", self._on_close_attempt)
+        if parent: 
+            self.move(parent.geometry().center() - self.rect().center())
+        else:
+            # Fallback centering
+            screen_geom = QApplication.primaryScreen().geometry()
+            x = (screen_geom.width() - self.width()) // 2
+            y = (screen_geom.height() - self.height()) // 2
+            self.move(x, y)
 
         self._build_ui(level, matched_words)
-
-        # Modal
-        self._win.grab_set()
-        self._win.focus_force()
-
-        # Start button countdown
+        
         self._start_delay_countdown(self._delay)
-
         logger.info("WarningBox shown (level %d, delay %ds)", level, warning_delay)
+        
+        self.setWindowModality(Qt.ApplicationModal)
+        self.show()
+
+        # Focus enforcement timer (200ms)
+        self._focus_timer = QTimer(self)
+        self._focus_timer.timeout.connect(self._enforce_focus)
+        self._focus_timer.start(200)
 
     def _build_ui(self, level: int, matched_words: list):
-        """Build warning UI elements."""
-        # Header
-        header = ctk.CTkFrame(self._win, height=50, corner_radius=0,
-                               fg_color=("#FFA726", "#E65100"))
-        header.pack(fill="x")
-        header.pack_propagate(False)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        card = QFrame()
+        card.setFixedSize(560, 480)
+        card.setStyleSheet("background-color: #121212; color: white; border-radius: 12px; border: 2px solid #333333;")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        ctk.CTkLabel(
-            header,
-            text=f"⚠️ Peringatan Level {level}",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color="white",
-        ).pack(expand=True)
+        # Header
+        header = QFrame()
+        header.setFixedHeight(70)
+        header.setStyleSheet("background-color: #FFC107; border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 0px; border-bottom-right-radius: 0px; border: none;")
+        h_lyt = QVBoxLayout(header)
+        h_lyt.setContentsMargins(0, 0, 0, 0)
+        title = QLabel(f"⚠️ PERINGATAN PELANGGARAN LEVEL {level}")
+        title.setStyleSheet("font-size: 22px; font-weight: 900; color: #000000; letter-spacing: 1px;")
+        title.setAlignment(Qt.AlignCenter)
+        h_lyt.addWidget(title)
+        layout.addWidget(header)
 
         # Content
-        content = ctk.CTkFrame(self._win, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=25, pady=15)
+        content = QFrame()
+        content.setStyleSheet("border: none;")
+        c_lyt = QVBoxLayout(content)
+        c_lyt.setContentsMargins(40, 30, 40, 30)
+        c_lyt.setSpacing(20)
 
-        # Message from Config or StaticData
-        message = self._custom_message
-        if not message:
-            message = static_data.get_message(level)
+        # "Apa yang terjadi?"
+        info_lbl = QLabel("Tindakan Anda melanggar aturan komunikasi.")
+        info_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #E0E0E0;")
+        info_lbl.setAlignment(Qt.AlignCenter)
+        c_lyt.addWidget(info_lbl)
 
-        ctk.CTkLabel(
-            content,
-            text=message,
-            font=ctk.CTkFont(size=14),
-            justify="center",
-            wraplength=470,
-        ).pack(pady=(10, 15))
+        # Message
+        msg_text = self._custom_message if self._custom_message else static_data.get_message(level)
+        msg_lbl = QLabel(msg_text)
+        msg_lbl.setStyleSheet("font-size: 18px; color: #FFFFFF;")
+        msg_lbl.setAlignment(Qt.AlignCenter)
+        msg_lbl.setWordWrap(True)
+        c_lyt.addWidget(msg_lbl)
 
-        # Matched words
+        # Words Highlight Box
         if matched_words:
-            words_text = f"Kata terdeteksi: {', '.join(matched_words)}"
-            ctk.CTkLabel(
-                content,
-                text=words_text,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color="#FF5252",
-                wraplength=470,
-            ).pack(pady=(0, 15))
+            w_frame = QFrame()
+            w_frame.setStyleSheet("background-color: rgba(255, 82, 82, 0.15); border: 2px solid #FF5252; border-radius: 8px;")
+            wf_lyt = QVBoxLayout(w_frame)
+            wf_lyt.setContentsMargins(15, 15, 15, 15)
+            
+            w_lbl = QLabel(f"KATA TERDETEKSI:\n{', '.join(matched_words).upper()}")
+            w_lbl.setStyleSheet("font-size: 16px; font-weight: 900; color: #FF5252; border: none;")
+            w_lbl.setAlignment(Qt.AlignCenter)
+            w_lbl.setWordWrap(True)
+            wf_lyt.addWidget(w_lbl)
+            c_lyt.addWidget(w_frame)
+            
+        c_lyt.addStretch()
 
-        # Acknowledge button (disabled during delay)
-        self._ack_btn = ctk.CTkButton(
-            content,
-            text=f"Saya Mengerti ({self._delay}s)",
-            height=45,
-            font=ctk.CTkFont(size=14, weight="bold"),
-            corner_radius=8,
-            fg_color="#616161",
-            hover_color="#616161",
-            state="disabled",
-            command=self._dismiss,
-        )
-        self._ack_btn.pack(fill="x", pady=(10, 0))
+        self._ack_btn = QPushButton(f"SAYA MENGERTI ({self._delay}s)")
+        self._ack_btn.setFixedHeight(55)
+        self._ack_btn.setEnabled(False)
+        self._ack_btn.setCursor(Qt.PointingHandCursor)
+        self._ack_btn.setStyleSheet("""
+            QPushButton { background-color: #424242; color: #9E9E9E; border-radius: 8px; font-size: 17px; font-weight: 900; border: none; }
+            QPushButton:enabled { background-color: #FFC107; color: #000000; }
+            QPushButton:enabled:hover { background-color: #FFB300; }
+        """)
+        self._ack_btn.clicked.connect(self._dismiss)
+        c_lyt.addWidget(self._ack_btn)
+
+        layout.addWidget(content)
+        main_layout.addWidget(card)
 
     def _start_delay_countdown(self, remaining: int):
-        """Countdown sebelum tombol aktif."""
-        if remaining <= 0:
-            self._ack_btn.configure(
-                text="Saya Mengerti ✓",
-                state="normal",
-                fg_color="#1565C0",
-                hover_color="#0D47A1",
-            )
-            self._countdown_job = None
-            return
+        self._remaining = remaining
+        if remaining > 0:
+            self._ack_btn.setText(f"SAYA MENGERTI ({self._remaining}s)")
+            self._countdown_timer.start(1000)
+        else:
+            self._timer_tick()
 
-        self._ack_btn.configure(text=f"Saya Mengerti ({remaining}s)")
-        self._countdown_job = self._win.after(
-            1000, self._start_delay_countdown, remaining - 1
-        )
+    def _timer_tick(self):
+        # Selalu paksa fokus meskipun waktu hitung mundur habis agar tidak di-bypass
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+        
+        if self._remaining > 0:
+            self._remaining -= 1
+            if self._remaining <= 0:
+                self._ack_btn.setEnabled(True)
+                self._ack_btn.setText("SAYA MENGERTI ✓")
+            else:
+                self._ack_btn.setText(f"SAYA MENGERTI ({self._remaining}s)")
 
-    def _on_close_attempt(self):
+    def closeEvent(self, event):
         """Intercept X button — require password."""
         if self._auth:
+            event.ignore()
             self._show_password_prompt()
         else:
-            pass
+            self._dismiss()
 
     def _show_password_prompt(self):
-        """Show password dialog to force-close warning."""
-        from app.login_dialog import LoginDialog
-
-        # T13 Bugfix: Turunkan z-index warningbox sejenak agar dialog auth bisa muncul di depannya
-        self._win.attributes("-topmost", False)
-
+        from app.login_dialog import show_login_dialog
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+        self.show() # Refresh flags
+        
         def _on_cancel():
-            # Kembalikan state topmost jika user batal login
-            try:
-                self._win.attributes("-topmost", True)
-                self._win.focus_force()
-            except Exception:
-                pass
+            self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+            self.show()
 
-        LoginDialog(
-            parent=self._root,
+        show_login_dialog(
             auth_service=self._auth,
             on_success=self._force_dismiss,
             on_cancel=_on_cancel,
             exit_mode=True,
+            parent=self
         )
 
     def _force_dismiss(self):
-        """Force dismiss after successful password."""
         logger.info("WarningBox force-dismissed via password")
         self._dismiss()
 
+    def _enforce_focus(self):
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+
     def _dismiss(self):
-        """Close the warning box."""
-        if self._countdown_job:
-            try:
-                self._win.after_cancel(self._countdown_job)
-            except Exception:
-                pass
-        try:
-            self._win.grab_release()
-            self._win.destroy()
-        except Exception:
-            pass
+        if hasattr(self, "_focus_timer"):
+            self._focus_timer.stop()
+        if self._countdown_timer.isActive():
+            self._countdown_timer.stop()
         logger.info("WarningBox dismissed")
-        # Notify manager that penalty is done
         if self._on_dismiss:
-            try:
-                self._on_dismiss()
-            except Exception:
-                pass
+            try: self._on_dismiss()
+            except Exception: pass
+        self.accept()
 
 
 # ================================================================
 # SIMPLE WARNING BOX (Surgical Downloads Guard)
 # ================================================================
 
-class SimpleWarningBox:
-    """
-    Jendela peringatan sederhana untuk Installer Guard.
-    Tanpa timer, hanya tombol OK, dan tidak menutupi seluruh layar.
-    """
-    
+class SimpleWarningBox(QDialog):
     _instance = None
     
-    def __init__(self, root: tk.Tk, custom_text=None):
-        # Prevent multiple popups at once
+    def __init__(self, custom_text=None, parent=None):
         if SimpleWarningBox._instance is not None:
             return
             
         SimpleWarningBox._instance = self
-        self._root = root
+        super().__init__(parent)
         
-        self._win = ctk.CTkToplevel(root) if ctk else tk.Toplevel(root)
-        self._win.title("⚠️ Peringatan Sistem")
-        self._win.geometry("450x200")
-        self._win.resizable(False, False)
-        self._win.attributes("-topmost", True)
-        self._win.transient(root)
+        self.setWindowTitle("⚠️ Peringatan Sistem")
+        self.setFixedSize(450, 220)
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setStyleSheet("background-color: #0D1117; color: white; border-radius: 10px; border: 2px solid #D32F2F;")
         
-        # Center on screen
-        self._win.update_idletasks()
-        x = (self._win.winfo_screenwidth() // 2) - 225
-        y = (self._win.winfo_screenheight() // 2) - 100
-        self._win.geometry(f"+{x}+{y}")
+        if parent: self.move(parent.geometry().center() - self.rect().center())
         
-        self._win.protocol("WM_DELETE_WINDOW", self._dismiss)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        content = ctk.CTkFrame(self._win, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=20, pady=20)
+        h = QLabel("🚨 DILARANG 🚨")
+        h.setStyleSheet("font-size: 20px; font-weight: bold; color: #FF5252;")
+        h.setAlignment(Qt.AlignCenter)
+        layout.addWidget(h)
         
-        ctk.CTkLabel(
-            content,
-            text="🚨 DILARANG 🚨",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color="#FF5252"
-        ).pack(pady=(0, 10))
+        txt = custom_text if custom_text else "Dilarang mengunduh dan mengeksekusi installer di folder Downloads."
+        m = QLabel(txt)
+        m.setStyleSheet("font-size: 14px;")
+        m.setAlignment(Qt.AlignCenter)
+        m.setWordWrap(True)
+        layout.addWidget(m)
         
-        text_to_show = custom_text if custom_text else "Dilarang mengunduh dan mengeksekusi installer di folder Downloads."
+        btn = QPushButton("OK, Saya Mengerti")
+        btn.setFixedHeight(35)
+        btn.setFixedWidth(200)
+        btn.setStyleSheet("background-color: #161B22; color: white; border: 1px solid #21262D; border-radius: 6px; font-weight: bold;")
+        btn.clicked.connect(self._dismiss)
         
-        ctk.CTkLabel(
-            content,
-            text=text_to_show,
-            font=ctk.CTkFont(size=14),
-            justify="center",
-            wraplength=400
-        ).pack(pady=(0, 20))
+        # Center the button
+        h_lyt = QVBoxLayout()
+        h_lyt.setAlignment(Qt.AlignCenter)
+        h_lyt.addWidget(btn)
+        layout.addLayout(h_lyt)
         
-        ctk.CTkButton(
-            content,
-            text="OK, Saya Mengerti",
-            font=ctk.CTkFont(weight="bold"),
-            width=200,
-            command=self._dismiss
-        ).pack()
+        self.setWindowModality(Qt.ApplicationModal)
+        self.show()
         
-        # Modal
-        self._win.grab_set()
-        self._win.focus_force()
-        logger.info("SimpleWarningBox shown for Downloads Guard")
+        # Focus enforcement timer
+        self._focus_timer = QTimer(self)
+        self._focus_timer.timeout.connect(self._enforce_focus)
+        self._focus_timer.start(500)
         
+    def _enforce_focus(self):
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+
     def _dismiss(self):
-        try:
-            self._win.grab_release()
-            self._win.destroy()
-        except Exception:
-            pass
-        finally:
-            SimpleWarningBox._instance = None
-            logger.info("SimpleWarningBox dismissed")
+        if hasattr(self, "_focus_timer"):
+            self._focus_timer.stop()
+        SimpleWarningBox._instance = None
+        self.accept()
 
 
 # ================================================================
@@ -303,41 +305,26 @@ class SimpleWarningBox:
 class LockdownOverlay:
     """
     Fullscreen overlay yang muncul saat lockdown aktif (kelipatan 3).
-
-    Features:
-    - Jendela fullscreen, hitam 90% opacity, topmost
-    - Judul dan pesan dari config
-    - Kutipan acak dari StaticData
-    - Countdown timer
-    - Input blocking (keyboard hooks)
-    - Hidden password input + Enter = admin override (anti-brute force)
     """
 
-    # Anti-brute force constants
     MAX_OVERRIDE_ATTEMPTS = 3
     OVERRIDE_LOCKOUT_SEC = 30
 
-    def __init__(self, root: tk.Tk, auth_service=None):
-        self._root = root
+    def __init__(self, parent=None, auth_service=None):
+        self._parent = parent
         self._auth = auth_service
-        self._overlay_window: Optional[tk.Toplevel] = None
-        self._countdown_label: Optional[tk.Label] = None
+        self._overlay_window = None
         self._is_active = False
         self._remaining_seconds = 0
-        self._countdown_timer_id = None
-        self._on_dismiss: Optional[Callable] = None
+        self._on_dismiss = None
+        self._on_unlock = None
 
-        # ── Admin Override State ──
         self._override_attempt_count = 0
-        self._override_lockout_until: float = 0.0
-        self._password_var: Optional[tk.StringVar] = None
-        self._password_entry: Optional[tk.Entry] = None
-        self._status_label: Optional[tk.Label] = None
+        self._override_lockout_until = 0.0
 
-        # ── Input Blocking ──
         self._hook_installed = False
         self._hook_handle = None
-        self._hook_callback = None  # prevent GC
+        self._hook_callback = None
 
     @property
     def is_active(self) -> bool:
@@ -345,377 +332,255 @@ class LockdownOverlay:
 
     def show(self, level: int, matched_words: list = None, duration: int = 60,
              on_dismiss: Callable = None, on_unlock: Callable = None):
-        """Menampilkan lockdown overlay."""
-        if self._is_active:
-            logger.warning("Overlay already active, ignoring")
-            return
+        if self._is_active: return
 
         self._on_dismiss = on_dismiss
         self._on_unlock = on_unlock
 
-        # Config values
         lockdown_title = "AREA TERKUNCI"
         lockdown_message = "Anda melanggar aturan berbahasa di GC Net."
         if self._auth:
             lockdown_title = self._auth.get_config("LockdownTitle", lockdown_title)
             lockdown_message = self._auth.get_config("LockdownMessage", lockdown_message)
 
-        logger.warning(
-            "🔒 LOCKDOWN ACTIVATED | Level %d | Duration: %ds",
-            level, duration
-        )
-
+        logger.warning(f"🔒 LOCKDOWN ACTIVATED | Level {level} | Duration: {duration}s")
         self._is_active = True
         self._remaining_seconds = duration
-
-        # Reset override state for this session
         self._override_attempt_count = 0
         self._override_lockout_until = 0.0
 
         quote = static_data.get_random_quote(level)
         self._create_overlay(level, lockdown_title, lockdown_message, duration, matched_words or [], quote)
         self._install_keyboard_hook()
-        self._update_countdown()
 
     def dismiss(self):
-        """Menutup overlay (dipanggil saat countdown selesai atau admin override)."""
         self._is_active = False
-
-        if self._countdown_timer_id:
-            try:
-                self._root.after_cancel(self._countdown_timer_id)
-            except Exception:
-                pass
-            self._countdown_timer_id = None
-
-        self._remove_keyboard_hook()
-
         if self._overlay_window:
-            try:
-                self._overlay_window.destroy()
-            except Exception:
-                pass
+            if self._overlay_window._countdown_timer.isActive():
+                self._overlay_window._countdown_timer.stop()
+            self._overlay_window.close()
             self._overlay_window = None
 
+        self._remove_keyboard_hook()
         logger.info("🔓 LOCKDOWN DISMISSED")
-
-        # Notify manager that penalty is done
         if self._on_dismiss:
-            try:
-                self._on_dismiss()
-            except Exception:
-                pass
-
-    # ================================================================
-    # OVERLAY WINDOW
-    # ================================================================
+            try: self._on_dismiss()
+            except Exception: pass
 
     def _create_overlay(self, level, title, message, duration, matched_words, quote):
-        """Membuat jendela overlay fullscreen."""
-        self._overlay_window = tk.Toplevel(self._root)
-        win = self._overlay_window
-
-        win.attributes("-fullscreen", True)
-        win.attributes("-topmost", True)
-        win.attributes("-alpha", 0.90)
-        win.configure(bg="#0a0a0a")
-        win.overrideredirect(True)
-        win.protocol("WM_DELETE_WINDOW", self._on_close_attempt)
-
-        container = tk.Frame(win, bg="#0a0a0a")
-        container.place(relx=0.5, rely=0.5, anchor="center")
-
-        # Shield Icon
-        tk.Label(
-            container, text="🔒",
-            font=("Segoe UI Emoji", 72), bg="#0a0a0a", fg="white",
-        ).pack(pady=(0, 10))
-
-        # Title
-        tk.Label(
-            container, text=title,
-            font=("Segoe UI", 32, "bold"), bg="#0a0a0a", fg="#FF1744",
-        ).pack(pady=(0, 10))
-
-        # Message
-        tk.Label(
-            container, text=message,
-            font=("Segoe UI", 18), bg="#0a0a0a", fg="white",
-            justify="center", wraplength=800,
-        ).pack(pady=(0, 20))
-
-        # Level indicator
-        tk.Label(
-            container,
-            text=f"⚠ Pelanggaran ke-{level}",
-            font=("Segoe UI", 16, "bold"), bg="#0a0a0a", fg="#FF6D00",
-        ).pack(pady=(0, 10))
-
-        # Matched Words
-        if matched_words:
-            tk.Label(
-                container,
-                text=f"Kata terdeteksi: {', '.join(matched_words)}",
-                font=("Segoe UI", 14), bg="#0a0a0a", fg="#FF6B6B",
-            ).pack(pady=(0, 15))
-
-        # Countdown
-        self._countdown_label = tk.Label(
-            container,
-            text=self._format_countdown(duration),
-            font=("Consolas", 52, "bold"), bg="#0a0a0a", fg="#FF1744",
-        )
-        self._countdown_label.pack(pady=(10, 15))
-
-        # Quote
-        tk.Label(
-            container, text=quote,
-            font=("Segoe UI", 13, "italic"), bg="#0a0a0a", fg="#888888",
-            justify="center", wraplength=700,
-        ).pack(pady=(10, 10))
-
-        # ── Hidden Admin Password Input ──
-        # Invisible password field — admin types password and presses Enter
-        self._password_var = tk.StringVar()
-        self._password_entry = tk.Entry(
-            container,
-            textvariable=self._password_var,
-            show="•",
-            font=("Consolas", 12),
-            bg="#1a1a1a",
-            fg="#666666",
-            insertbackground="#666666",
-            relief="flat",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#333333",
-            highlightcolor="#555555",
-            width=25,
-            justify="center",
-        )
-        self._password_entry.pack(pady=(15, 3))
-        self._password_entry.bind("<Return>", self._on_password_enter)
-
-        # Status label for override feedback
-        self._status_label = tk.Label(
-            container,
-            text="",
-            font=("Segoe UI", 10), bg="#0a0a0a", fg="#FF5252",
-        )
-        self._status_label.pack(pady=(0, 5))
-
-        # Instruction
-        tk.Label(
-            container,
-            text="Layar akan otomatis terbuka setelah waktu habis.",
-            font=("Segoe UI", 11), bg="#0a0a0a", fg="#555555",
-            justify="center",
-        ).pack(pady=(10, 0))
-
-        win.focus_force()
-        win.grab_set()
-
-        # Focus the password entry so admin can type immediately
-        self._password_entry.focus_set()
+        self._overlay_window = LockdownWindow(self, level, title, message, duration, matched_words, quote)
+        self._overlay_window.showFullScreen()
 
     # ================================================================
-    # ADMIN OVERRIDE (Hidden Password + Enter)
-    # ================================================================
-
-    def _on_password_enter(self, event=None):
-        """Admin menekan Enter pada hidden password field."""
-        if not self._auth:
-            return
-
-        # Check override lockout
-        now = time.time()
-        if self._override_lockout_until > 0 and now < self._override_lockout_until:
-            remaining = int(self._override_lockout_until - now) + 1
-            self._show_override_status(
-                f"Terlalu banyak percobaan! Tunggu {remaining}s",
-                "#FF5252"
-            )
-            self._password_var.set("")
-            return
-
-        # Reset lockout if expired
-        if self._override_lockout_until > 0 and now >= self._override_lockout_until:
-            self._override_lockout_until = 0.0
-            self._override_attempt_count = 0
-
-        password = self._password_var.get().strip()
-        if not password:
-            return
-
-        # Verify using AuthService (SHA256 + Salt)
-        if self._auth.verify_password(password):
-            logger.info("✓ Lockdown admin override — password accepted")
-            self._show_override_status("✓ Password diterima — membuka...", "#4CAF50")
-            self._password_var.set("")
-
-            # Trigger unlock callback (reset violation count)
-            if self._on_unlock:
-                try:
-                    self._on_unlock()
-                except Exception as e:
-                    logger.error("Unlock callback error: %s", e)
-
-            # Dismiss after short delay for visual feedback
-            self._overlay_window.after(500, self._force_dismiss)
-        else:
-            self._override_attempt_count += 1
-            remaining_attempts = self.MAX_OVERRIDE_ATTEMPTS - self._override_attempt_count
-            logger.warning(
-                "✗ Override failed (attempt %d/%d)",
-                self._override_attempt_count, self.MAX_OVERRIDE_ATTEMPTS
-            )
-
-            if self._override_attempt_count >= self.MAX_OVERRIDE_ATTEMPTS:
-                self._override_lockout_until = time.time() + self.OVERRIDE_LOCKOUT_SEC
-                self._show_override_status(
-                    f"Terkunci! Tunggu {self.OVERRIDE_LOCKOUT_SEC} detik.",
-                    "#FF5252"
-                )
-                logger.warning(
-                    "⚠ Override locked out for %ds",
-                    self.OVERRIDE_LOCKOUT_SEC
-                )
-            else:
-                self._show_override_status(
-                    f"Password salah! Sisa: {remaining_attempts}",
-                    "#FF5252"
-                )
-
-            self._password_var.set("")
-
-    def _show_override_status(self, text: str, color: str):
-        """Update status label on lockdown screen."""
-        if self._status_label:
-            try:
-                self._status_label.configure(text=text, fg=color)
-            except Exception:
-                pass
-
-    def _on_close_attempt(self):
-        """Intercept close — ignore (use password instead)."""
-        # Do nothing — lockdown cannot be closed via X button
-        pass
-
-    def _force_dismiss(self):
-        """Force dismiss after successful password auth."""
-        logger.info("Lockdown force-dismissed via admin override")
-        self.dismiss()
-
-    def _update_countdown(self):
-        """Update countdown timer setiap detik."""
-        if not self._is_active or not self._overlay_window:
-            return
-
-        if self._remaining_seconds <= 0:
-            self.dismiss()
-            return
-
-        if self._countdown_label:
-            try:
-                self._countdown_label.configure(
-                    text=self._format_countdown(self._remaining_seconds)
-                )
-            except Exception:
-                pass
-
-        self._remaining_seconds -= 1
-        self._countdown_timer_id = self._root.after(
-            1000, self._update_countdown
-        )
-
-    @staticmethod
-    def _format_countdown(seconds: int) -> str:
-        minutes = seconds // 60
-        secs = seconds % 60
-        return f"{minutes:02d}:{secs:02d}"
-
-    # ================================================================
-    # INPUT BLOCKING — SINGLE ATTEMPT, NON-BLOCKING
+    # INPUT BLOCKING
     # ================================================================
 
     def _install_keyboard_hook(self):
-        """
-        Install low-level keyboard hook (single attempt).
-        Jika gagal → warn saja, ZERO lag.
-        """
-        if self._hook_installed:
-            return
-
+        if self._hook_installed: return
         try:
             import ctypes
             import ctypes.wintypes
 
             WH_KEYBOARD_LL = 13
+            WM_KEYDOWN = 0x0100
             WM_SYSKEYDOWN = 0x0104
             VK_TAB = 0x09
             VK_LWIN = 0x5B
             VK_RWIN = 0x5C
             VK_ESCAPE = 0x1B
+            VK_F4 = 0x73
 
-            HOOKPROC = ctypes.CFUNCTYPE(
-                ctypes.wintypes.LPARAM,
-                ctypes.c_int,
-                ctypes.wintypes.WPARAM,
-                ctypes.wintypes.LPARAM,
-            )
-
+            HOOKPROC = ctypes.CFUNCTYPE(ctypes.wintypes.LPARAM, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
 
             def keyboard_hook_proc(nCode, wParam, lParam):
                 if nCode >= 0 and self._is_active:
-                    vk_code = ctypes.cast(
-                        lParam,
-                        ctypes.POINTER(ctypes.wintypes.DWORD)
-                    ).contents.value
-
-                    if wParam == WM_SYSKEYDOWN and vk_code == VK_TAB:
-                        return 1
-                    if vk_code in (VK_LWIN, VK_RWIN):
-                        return 1
+                    vk_code = ctypes.cast(lParam, ctypes.POINTER(ctypes.wintypes.DWORD)).contents.value
+                    # Block Alt+Tab
+                    if wParam == WM_SYSKEYDOWN and vk_code == VK_TAB: return 1
+                    # Block Win keys
+                    if vk_code in (VK_LWIN, VK_RWIN): return 1
+                    # Block Ctrl+Esc (Task Manager shortcut)
                     if vk_code == VK_ESCAPE:
-                        if user32.GetAsyncKeyState(0x11) & 0x8000:
-                            return 1
-
+                        if user32.GetAsyncKeyState(0x11) & 0x8000: return 1
+                    # Block Alt+F4
+                    if wParam == WM_SYSKEYDOWN and vk_code == VK_F4: return 1
+                    # Block Alt+Esc
+                    if wParam == WM_SYSKEYDOWN and vk_code == VK_ESCAPE: return 1
+                    # Block Ctrl+Shift+Esc (Task Manager)
+                    if vk_code == VK_ESCAPE:
+                        ctrl = user32.GetAsyncKeyState(0x11) & 0x8000
+                        shift = user32.GetAsyncKeyState(0x10) & 0x8000
+                        if ctrl and shift: return 1
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
             self._hook_callback = HOOKPROC(keyboard_hook_proc)
-
             self._hook_handle = user32.SetWindowsHookExW(
-                WH_KEYBOARD_LL,
-                self._hook_callback,
-                kernel32.GetModuleHandleW(None),
-                0,
+                WH_KEYBOARD_LL, self._hook_callback, kernel32.GetModuleHandleW(None), 0
             )
 
             if self._hook_handle:
                 self._hook_installed = True
-                logger.info("✓ Keyboard hook installed")
             else:
-                err = kernel32.GetLastError()
-                logger.warning(
-                    "⚠ Hook unavailable (err=%d). Run as Admin. Continuing.",
-                    err
-                )
-
+                logger.warning("Hook unavailable. Run as Admin. Continuing.")
         except Exception as e:
             logger.warning("Hook error: %s — continuing without hook", e)
 
     def _remove_keyboard_hook(self):
-        """Remove keyboard hook saat overlay ditutup."""
-        if not self._hook_installed or not self._hook_handle:
-            return
+        if not self._hook_installed or not self._hook_handle: return
         try:
             import ctypes
             ctypes.windll.user32.UnhookWindowsHookEx(self._hook_handle)
             self._hook_installed = False
             self._hook_handle = None
-            logger.info("✓ Keyboard hook removed")
-        except Exception as e:
-            logger.error("Failed to remove hook: %s", e)
+        except Exception: pass
 
+
+class LockdownWindow(QDialog):
+    """Actual fullscreen QDialog for Lockdown."""
+    def __init__(self, manager: LockdownOverlay, level, title, message, duration, matched_words, quote):
+        super().__init__()
+        self._manager = manager
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2b0000, stop:1 #0a0000);
+                font-family: 'Segoe UI';
+            }
+        """)
+        self.setAttribute(Qt.WA_TranslucentBackground, False) # True breaks click-through sometimes, making it 95% opacity works
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(25)
+        
+        icon = QLabel("🔒")
+        icon.setStyleSheet("font-size: 120px; color: #FF3333;")
+        icon.setAlignment(Qt.AlignCenter)
+        layout.addWidget(icon)
+
+        t = QLabel(title.upper())
+        t.setStyleSheet("font-size: 48px; font-weight: 900; color: #FF1744; letter-spacing: 2px;")
+        t.setAlignment(Qt.AlignCenter)
+        layout.addWidget(t)
+
+        m = QLabel(f"KENAPA SAYA DIBLOKIR?\n{message}")
+        m.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
+        m.setAlignment(Qt.AlignCenter)
+        m.setWordWrap(True)
+        layout.addWidget(m)
+
+        l = QLabel(f"⚠ PELANGGARAN KE-{level}")
+        l.setStyleSheet("font-size: 18px; font-weight: 900; color: #FF6D00; background-color: rgba(255,109,0,0.15); padding: 5px 15px; border-radius: 8px;")
+        l.setAlignment(Qt.AlignCenter)
+        
+        l_lyt = QHBoxLayout()
+        l_lyt.setAlignment(Qt.AlignCenter)
+        l_lyt.addWidget(l)
+        layout.addLayout(l_lyt)
+
+        if matched_words:
+            w = QLabel(f"KATA TERDETEKSI: {', '.join(matched_words).upper()}")
+            w.setStyleSheet("font-size: 16px; font-weight: 900; color: #FFCCCC; background-color: rgba(255, 0, 0, 0.3); border: 2px solid #FF3333; padding: 10px 20px; border-radius: 8px;")
+            w.setAlignment(Qt.AlignCenter)
+            
+            w_lyt = QHBoxLayout()
+            w_lyt.setAlignment(Qt.AlignCenter)
+            w_lyt.addWidget(w)
+            layout.addLayout(w_lyt)
+
+        self._countdown_label = QLabel("")
+        self._countdown_label.setStyleSheet("font-family: 'Consolas'; font-size: 80px; font-weight: 900; color: #FF1744;")
+        self._countdown_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self._countdown_label)
+
+        q = QLabel(f"\"{quote}\"")
+        q.setStyleSheet("font-size: 16px; font-style: italic; color: #AAAAAA;")
+        q.setAlignment(Qt.AlignCenter)
+        layout.addWidget(q)
+
+        layout.addSpacing(30)
+        
+        # Hidden Password Entry
+        self._password_entry = QLineEdit()
+        self._password_entry.setEchoMode(QLineEdit.Password)
+        self._password_entry.setStyleSheet("background-color: transparent; border: 1px solid rgba(255,255,255,0.05); color: #555555; border-radius: 4px; padding: 5px;")
+        self._password_entry.setFixedWidth(200)
+        self._password_entry.setAlignment(Qt.AlignCenter)
+        self._password_entry.returnPressed.connect(self._on_password_enter)
+        layout.addWidget(self._password_entry, alignment=Qt.AlignHCenter)
+
+        self._status_label = QLabel("")
+        self._status_label.setStyleSheet("font-size: 11px; color: #FF5252;")
+        self._status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self._status_label)
+
+        i = QLabel("Layar akan otomatis terbuka setelah waktu habis.")
+        i.setStyleSheet("font-size: 12px; color: #555555;")
+        i.setAlignment(Qt.AlignCenter)
+        layout.addWidget(i)
+
+        self._timer_tick() # Initial set
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.timeout.connect(self._timer_tick)
+        self._countdown_timer.start(1000)
+
+        QTimer.singleShot(100, self._password_entry.setFocus)
+
+        # Focus enforcement timer (200ms)
+        self._focus_timer = QTimer(self)
+        self._focus_timer.timeout.connect(self._enforce_lockdown_focus)
+        self._focus_timer.start(200)
+
+    def _enforce_lockdown_focus(self):
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+
+    def _timer_tick(self):
+        if self._manager._remaining_seconds <= 0:
+            self._manager.dismiss()
+            return
+        
+        minutes = self._manager._remaining_seconds // 60
+        secs = self._manager._remaining_seconds % 60
+        self._countdown_label.setText(f"{minutes:02d}:{secs:02d}")
+        self._manager._remaining_seconds -= 1
+
+    def closeEvent(self, event):
+        event.ignore()
+
+    def _on_password_enter(self):
+        if not self._manager._auth: return
+        now = time.time()
+        pwd = self._password_entry.text().strip()
+        manager = self._manager
+        
+        if manager._override_lockout_until > 0 and now < manager._override_lockout_until:
+            rem = int(manager._override_lockout_until - now) + 1
+            self._status_label.setText(f"Terlalu banyak percobaan! Tunggu {rem}s")
+            self._password_entry.clear()
+            return
+
+        if manager._override_lockout_until > 0:
+            manager._override_lockout_until = 0.0
+            manager._override_attempt_count = 0
+
+        if manager._auth.verify_password(pwd):
+            self._status_label.setText("✓ Password diterima — membuka...")
+            self._status_label.setStyleSheet("font-size: 11px; color: #4CAF50;")
+            self._password_entry.clear()
+            if manager._on_unlock:
+                try: manager._on_unlock()
+                except Exception: pass
+            QTimer.singleShot(500, manager.dismiss)
+        else:
+            manager._override_attempt_count += 1
+            if manager._override_attempt_count >= manager.MAX_OVERRIDE_ATTEMPTS:
+                manager._override_lockout_until = now + manager.OVERRIDE_LOCKOUT_SEC
+                self._status_label.setText(f"Terkunci! Tunggu {manager.OVERRIDE_LOCKOUT_SEC} detik.")
+            else:
+                rem_att = manager.MAX_OVERRIDE_ATTEMPTS - manager._override_attempt_count
+                self._status_label.setText(f"Password salah! Sisa percobaan: {rem_att}")
+            self._password_entry.clear()

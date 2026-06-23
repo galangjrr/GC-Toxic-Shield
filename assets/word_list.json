@@ -83,5 +83,22 @@
       "pju"
     ]
   },
-  "phonetic_mapping": {}
+  "phonetic_mapping": {
+    "peeler": "peler",
+    "peller": "peler",
+    "ngentod": "ngentot",
+    "kentod": "kentot",
+    "titid": "titit",
+    "njing": "anjing"
+  },
+  "context_exclusions": {
+    "peler": [
+      "honda", "yamaha", "suzuki", "toyota", "motor", "mobil", "resmi",
+      "utama", "pusat", "reseller", "dealer", "diler", "peeler", "kentang", "buah", "sayur"
+    ],
+    "pantek": [
+      "pantekin", "terpantek", "dipantek", "memantek", "pantekan"
+    ]
+  },
+  "allowed_words": ["kontrol", "mengontrol"]
 }
