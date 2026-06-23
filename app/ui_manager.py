@@ -1,4 +1,4 @@
-﻿# =============================================================
+# =============================================================
 # GC Toxic Shield — Admin Dashboard (PySide6)
 # =============================================================
 # 100% Pixel-Perfect UI Migration from CustomTkinter.
@@ -1488,6 +1488,7 @@ class AdminDashboard(QMainWindow):
     # ================================================================
     # TAB 7: PENGATURAN
     # ================================================================
+    def _build_settings_tab(self):
         from app.system_service import SystemService
         
         page = QWidget()
