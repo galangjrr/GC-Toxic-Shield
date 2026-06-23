@@ -1,6 +1,6 @@
 # 📚 Technical Documentation - GC Toxic Shield
 
-Dokumen ini berisi panduan teknis mendalam mengenai arsitektur, modularitas kode, struktur data, dan rekayasa OS level yang diterapkan pada **GC Toxic Shield** edisi 1.0.9 (PySide6 Edition).
+Dokumen ini berisi panduan teknis mendalam mengenai arsitektur, modularitas kode, struktur data, dan rekayasa OS level yang diterapkan pada **GC Toxic Shield** edisi 2.0.0 (PySide6 Edition).
 
 ---
 

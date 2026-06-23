@@ -2,7 +2,7 @@
 
 # 🛡️ GC Toxic Shield
 **Brand:** GC Net Security Suite  
-**Version:** 1.0.9 (PySide6 Edition)  
+**Version:** 2.0.0 (PySide6 Edition)  
 **Target OS:** Windows 10/11 x64  
 **Hardware Profile:** Optimized for maximum CPU efficiency (Integrated Graphics friendly)
 
@@ -17,7 +17,7 @@
 
 Jika pelanggaran terdeteksi, sistem akan mengaktifkan mekanisme peringatan visual agresif atau mengunci layar (Lockdown Overlay) untuk menegakkan disiplin bermain secara preventif, memastikan lingkungan warnet tetap nyaman dan ramah.
 
-### 🚀 Apa yang baru di Edisi 1.0.9?
+### 🚀 Apa yang baru di Edisi 2.0.0?
 *GC Toxic Shield* kini telah sepenuhnya bermigrasi ke **PySide6** untuk Client & Server, serta membawa pembaharuan arsitektur keamanan:
 - **🎨 Modern PySide6 UI:** Migrasi total dari CustomTkinter ke PySide6 dengan akselerasi GPU, rendering halus, dan QSS style yang konsisten.
 - **🛡️ InstallerGuard (Process-Level Blocker):** Tidak lagi mengacaukan registry Windows (`DisableMSI`/`NoControlPanel`). Pemblokiran Settings, Control Panel, dan program berbahaya dilakukan di level proses secara *real-time*.
