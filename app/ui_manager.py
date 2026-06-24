@@ -169,33 +169,33 @@ QSlider::handle:horizontal {{
 QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 3px; }}
 
 /* ComboBox */
-QComboBox {
+QComboBox {{
     background-color: {ENTRY_BG}; color: {TEXT};
     border: 1px solid {BORDER}; border-radius: 6px; padding: 4px 8px;
-}
-QComboBox::drop-down { border: none; }
+}}
+QComboBox::drop-down {{ border: none; }}
 
 /* Premium QCheckBox */
-QCheckBox {
+QCheckBox {{
     spacing: 10px;
     color: {TEXT};
     font-size: 12px;
     font-weight: bold;
-}
-QCheckBox::indicator {
+}}
+QCheckBox::indicator {{
     width: 18px;
     height: 18px;
     border: 1.5px solid {BORDER};
     border-radius: 5px;
     background-color: {ENTRY_BG};
-}
-QCheckBox::indicator:hover {
+}}
+QCheckBox::indicator:hover {{
     border-color: {ACCENT};
-}
-QCheckBox::indicator:checked {
+}}
+QCheckBox::indicator:checked {{
     background-color: {ACCENT};
     border-color: {ACCENT};
-}
+}}
 """
 
 # ── Imports ──
