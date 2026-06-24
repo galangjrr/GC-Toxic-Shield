@@ -35,20 +35,20 @@ logger = logging.getLogger("GCToxicShield.UI")
 REFRESH_INTERVAL_MS = 2000
 VU_METER_INTERVAL_MS = 80
 
-# ── Design Tokens (Pixel-perfect from mockup) ──
-BG       = "#0D1117"
-CARD     = "#161B22"
-BORDER   = "#21262D"
-ACCENT   = "#4F6EF7"
-SUCCESS  = "#2ECC71"
-DANGER   = "#E74C3C"
-WARNING  = "#F39C12"
-TEXT     = "#E8EAED"
-MUTED    = "#8B949E"
-ENTRY_BG = "#0D1117"
-TAB_BG   = "#161B22"
-TAB_SEL  = "#21262D"
-FONT_FAM = "Segoe UI"
+# ── Design Tokens (Obsidian Cyberpunk v2.1.0) ──
+BG       = "#080A10"
+CARD     = "#111628"
+BORDER   = "#1F263B"
+ACCENT   = "#6366F1"
+SUCCESS  = "#10B981"
+DANGER   = "#EF4444"
+WARNING  = "#F59E0B"
+TEXT     = "#F8FAFC"
+MUTED    = "#64748B"
+ENTRY_BG = "#0C0F19"
+TAB_BG   = "#111628"
+TAB_SEL  = "#1E293B"
+FONT_FAM = "Segoe UI Variable"
 
 # Global Stylesheet
 QSS = f"""
@@ -169,11 +169,33 @@ QSlider::handle:horizontal {{
 QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 3px; }}
 
 /* ComboBox */
-QComboBox {{
+QComboBox {
     background-color: {ENTRY_BG}; color: {TEXT};
     border: 1px solid {BORDER}; border-radius: 6px; padding: 4px 8px;
-}}
-QComboBox::drop-down {{ border: none; }}
+}
+QComboBox::drop-down { border: none; }
+
+/* Premium QCheckBox */
+QCheckBox {
+    spacing: 10px;
+    color: {TEXT};
+    font-size: 12px;
+    font-weight: bold;
+}
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 1.5px solid {BORDER};
+    border-radius: 5px;
+    background-color: {ENTRY_BG};
+}
+QCheckBox::indicator:hover {
+    border-color: {ACCENT};
+}
+QCheckBox::indicator:checked {
+    background-color: {ACCENT};
+    border-color: {ACCENT};
+}
 """
 
 # ── Imports ──
