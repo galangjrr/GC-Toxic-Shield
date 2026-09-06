@@ -1,104 +1,63 @@
 {
   "toxic_words": {
     "kontol": [
-      "kntl",
-      "kntol",
-      "kontl",
-      "contol",
-      "k0nt0l",
-      "k0ntol",
-      "kont0l",
-      "konthol"
+      "kontol"
     ],
     "memek": [
-      "mmk",
-      "memeq",
-      "meki",
-      "mekmek",
-      "m3m3k",
-      "m3mek",
-      "mem3k"
+      "memek"
     ],
     "ngentot": [
-      "ngentod",
-      "ngntt",
-      "ngntd",
-      "ngentt",
-      "ngntot",
-      "ngent0t",
-      "ngent0d",
-      "kentot",
-      "kentod"
-    ],
-    "ngewe": [
-      "ngwe",
-      "ngew",
-      "ngw",
-      "ng3w3"
-    ],
-    "peler": [
-      "pler",
-      "pelir"
-    ],
-    "itil": [
-      "itl",
-      "1t1l",
-      "itill"
+      "ngentot"
     ],
     "jembut": [
-      "jembud",
-      "jmbut",
-      "jmbud",
-      "jembot",
-      "jmbot",
-      "j3mbut"
+      "jembut"
     ],
-    "toket": [
-      "t0k3t",
-      "t0ket",
-      "tok3t",
-      "tt",
-      "tetek",
-      "t3t3k",
-      "teteq"
+    "ngewe": [
+      "ngewe"
     ],
-    "coli": [
-      "coly",
-      "c0li",
-      "c0ly"
+    "peler": [
+      "peler"
     ],
-    "colmek": [
-      "clmk",
-      "colmq"
-    ],
-    "sange": [
-      "sangek",
-      "sang3",
-      "sng",
-      "sangeh"
-    ],
-    "peju": [
-      "pejuh",
-      "pjuh",
-      "pju"
+    "itil": [
+      "itil"
     ]
   },
   "phonetic_mapping": {
+    "dealer": "peler",
     "peeler": "peler",
     "peller": "peler",
-    "ngentod": "ngentot",
-    "kentod": "kentot",
-    "titid": "titit",
-    "njing": "anjing"
+    "appler": "peler"
   },
   "context_exclusions": {
-    "peler": [
-      "honda", "yamaha", "suzuki", "toyota", "motor", "mobil", "resmi",
-      "utama", "pusat", "reseller", "dealer", "diler", "peeler", "kentang", "buah", "sayur"
+    "kontol": [
+      "kontrol", "kondo", "kumpul"
     ],
-    "pantek": [
-      "pantekin", "terpantek", "dipantek", "memantek", "pantekan"
+    "memek": [
+      "nenek", "mekar", "remeh"
+    ],
+    "ngentot": [
+      "ngantuk", "nuntut", "nyentuh"
+    ],
+    "jembut": [
+      "jemput", "lembut", "rambut"
+    ],
+    "ngewe": [
+      "dewe", "cewe", "ngawur"
+    ],
+    "peler": [
+      "honda", "yamaha", "kentang", "buah", "motor", "mobil"
+    ],
+    "itil": [
+      "kutil", "detil", "usil"
     ]
   },
-  "allowed_words": ["kontrol", "mengontrol"]
+  "allowed_words": [
+    "kontrol", "kondo", "kumpul",
+    "nenek", "mekar", "remeh",
+    "ngantuk", "nuntut", "nyentuh",
+    "jemput", "lembut", "rambut",
+    "dewe", "cewe", "ngawur",
+    "honda", "yamaha", "kentang", "buah", "motor", "mobil",
+    "kutil", "detil", "usil"
+  ]
 }

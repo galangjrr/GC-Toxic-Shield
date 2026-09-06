@@ -21,6 +21,7 @@ from typing import List, Dict, Any
 
 import numpy as np
 import ctypes
+from PySide6.QtCore import QObject, Signal
 
 try:
     import speech_recognition as sr
@@ -37,7 +38,8 @@ RE_INIT_DELAY_SEC = 5
 LISTEN_TIMEOUT = 10
 TARGET_RMS_DB = -20.0  # Target RMS level in dB for auto-normalization
 MIN_RMS_THRESHOLD = 0.001  # Below this → silence, don't normalize
-PHRASE_TIME_LIMIT = 5
+PHRASE_TIME_LIMIT = 8        # Max 8s per chunk — cegah mic gantung di ruang bising warnet
+MAX_NORMALIZE_GAIN = 3.0     # Batas gain 3x — cegah clipping kotak yang rusak kualitas STT
 
 
 def _set_thread_priority_high():
@@ -131,7 +133,7 @@ def _try_open_microphone(device_index, sample_rates):
     )
 
 
-class AudioEngine:
+class AudioEngine(QObject):
     """
     Non-Stop Audio Engine menggunakan Google Speech Recognition.
 
@@ -147,6 +149,8 @@ class AudioEngine:
     - Robust WinError 50 handling with full device re-init
     - blocksize=0 for Windows driver compatibility
     """
+    
+    transcription_signal = Signal(str)
 
     def __init__(
         self,
@@ -164,9 +168,14 @@ class AudioEngine:
                 "speech_recognition is required. "
                 "Install via: pip install SpeechRecognition PyAudio"
             )
+            
+        super().__init__()
 
         self.language = language
         self.on_transcription = on_transcription
+        if self.on_transcription:
+            self.transcription_signal.connect(self.on_transcription)
+            
         self.normalizer_callback = None  # Hook for standardizing transcript text
         self.input_device_index = input_device_index
         self.gain = initial_gain
@@ -179,21 +188,13 @@ class AudioEngine:
         self._device_changed = False  # Flag untuk device swap
         self._actual_sample_rate = TARGET_SAMPLE_RATE  # Resolved at open time
 
-        # ── Proximity Zone Filter (in-memory, hot-path safe) ──
-        self._proximity_zones: List[Dict[str, Any]] = [
-            {"id": "zone_1", "name": "Background Noise", "min_rms": 0.00, "max_rms": 0.05, "action": "IGNORE"},
-            {"id": "zone_2", "name": "User Voice", "min_rms": 0.06, "max_rms": 0.30, "action": "PROCESS"},
-            {"id": "zone_3", "name": "Distant Yell", "min_rms": 0.31, "max_rms": 0.45, "action": "IGNORE"},
-            {"id": "zone_4", "name": "User Yell", "min_rms": 0.46, "max_rms": 1.00, "action": "PROCESS"},
-        ]
-
         # ── Speech Recognition Setup ──
         self._recognizer = sr.Recognizer()
-        self._recognizer.dynamic_energy_threshold = True
-        self._recognizer.energy_threshold = 300
-        self._recognizer.pause_threshold = 2.5        # Tunggu 2.5s sebelum cut (cegah terpotong tengah kalimat)
-        self._recognizer.phrase_threshold = 0.3       # Minimum panjang frase
-        self._recognizer.non_speaking_duration = 0.5  # Padding 0.5s (ekor kalimat)
+        self._recognizer.dynamic_energy_threshold = True      # NYALAKAN KEMBALI: Wajib agar STT berjalan sesuai volume mic
+        self._recognizer.energy_threshold = 150               # Mulai dari angka sangat rendah agar mic yang pelan bisa tertangkap
+        self._recognizer.pause_threshold = 1.2                # Tunggu 1.2s (snappy response for shouting)
+        self._recognizer.phrase_threshold = 0.3               # Minimum panjang frase
+        self._recognizer.non_speaking_duration = 0.5          # Simpan 0.5 detik awal/akhir agar tidak terpotong
 
         # ── Threads ──
         self._listen_thread = None
@@ -310,28 +311,6 @@ class AudioEngine:
         """
         return float(self._current_rms)
 
-    @property
-    def proximity_zones(self) -> List[Dict[str, Any]]:
-        """Get the current proximity filter zones.
-
-        Returns:
-            List of zone dicts with keys: id, name, min_rms, max_rms, action.
-        """
-        return self._proximity_zones
-
-    @proximity_zones.setter
-    def proximity_zones(self, zones: List[Dict[str, Any]]) -> None:
-        """Set proximity filter zones (thread-safe via GIL).
-
-        The audio processing thread picks up the new list on its next
-        iteration — no lock required for atomic reference assignment.
-
-        Args:
-            zones: List of zone dictionaries.
-        """
-        self._proximity_zones = list(zones)  # Defensive copy
-        logger.info("Proximity zones updated (%d zones)", len(zones))
-
     # ================================================================
     # CORE: NON-STOP LISTEN LOOP (T11 + T12 Fixed)
     # ================================================================
@@ -370,6 +349,19 @@ class AudioEngine:
                     # Reset error counter on successful open
                     consecutive_errors = 0
 
+                    # ── Auto-calibrate mic noise floor per-device ──
+                    # Ukur desis ambient warnet (AC/kipas) sekali saat buka mic.
+                    # Hasil ukuran ini menggantikan hardcode energy_threshold = 150.
+                    try:
+                        logger.info("Calibrating ambient noise (1s)...")
+                        self._recognizer.adjust_for_ambient_noise(source, duration=1.0)
+                        logger.info(
+                            "Ambient noise calibrated → energy_threshold=%.1f",
+                            self._recognizer.energy_threshold
+                        )
+                    except Exception as cal_err:
+                        logger.warning("Ambient noise calibration failed: %s", cal_err)
+
                     # ── Inner loop: listen continuously ──
                     self._device_changed = False
 
@@ -401,6 +393,17 @@ class AudioEngine:
                                 logger.warning(
                                     "Audio detach failed: %s — skipping",
                                     copy_err
+                                )
+                                continue
+
+                            # ── Proximity Zone Gate ──
+                            # Evaluasi RMS chunk sebelum kirim ke Google STT.
+                            # Zona IGNORE dibuang di sini — suara desis & bocor PC sebelah tidak pernah sampai ke cloud.
+                            chunk_rms = self._calculate_rms(detached_audio)
+                            if not self._is_rms_in_process_zone(chunk_rms):
+                                logger.debug(
+                                    "Proximity IGNORED: rms=%.4f (desis/bocor)",
+                                    chunk_rms
                                 )
                                 continue
 
@@ -483,8 +486,8 @@ class AudioEngine:
             # Reset recognizer state
             self._recognizer = sr.Recognizer()
             self._recognizer.dynamic_energy_threshold = True
-            self._recognizer.energy_threshold = 300
-            self._recognizer.pause_threshold = 2.5
+            self._recognizer.energy_threshold = 150
+            self._recognizer.pause_threshold = 1.2
             self._recognizer.phrase_threshold = 0.3
             self._recognizer.non_speaking_duration = 0.5
             logger.info("✓ Recognizer re-created")
@@ -500,15 +503,6 @@ class AudioEngine:
             # ── Apply Manual Gain ──
             if self.gain != 1.0:
                 audio = self._apply_gain(audio)
-
-            # ── Proximity Zone Filter (pre-normalization RMS) ──
-            chunk_rms = self._calculate_rms(audio)
-            zone_action = self._evaluate_zone_action(chunk_rms)
-            if zone_action == "IGNORE":
-                logger.debug(
-                    "🔇 Zone filter: IGNORE (RMS=%.4f)", chunk_rms
-                )
-                return
 
             # ── Auto-Normalize (compensate weak mics) ──
             audio = self._normalize_audio(audio)
@@ -532,11 +526,10 @@ class AudioEngine:
 
                 logger.info("📝 Transcription: %s", text)
 
-                if self.on_transcription:
-                    try:
-                        self.on_transcription(text)
-                    except Exception as cb_err:
-                        logger.error("Callback error: %s", cb_err)
+                try:
+                    self.transcription_signal.emit(text)
+                except Exception as cb_err:
+                    logger.error("Callback error: %s", cb_err)
 
         except sr.UnknownValueError:
             pass  # No clear speech
@@ -551,6 +544,44 @@ class AudioEngine:
     # ================================================================
     # HELPERS
     # ================================================================
+
+    # Zona default proximity warnet.
+    # Format: (min_rms, max_rms, action)
+    # action="PROCESS" → kirim ke STT | action="IGNORE" → buang
+    _DEFAULT_PROXIMITY_ZONES = [
+        (0.000, 0.050, "IGNORE"),   # Desis AC/kipas/background noise
+        (0.051, 0.300, "PROCESS"),  # Suara mulut user normal
+        (0.301, 0.450, "IGNORE"),   # Teriakan bocor dari PC sebelah
+        (0.451, 1.000, "PROCESS"),  # Teriakan langsung ke mic user
+    ]
+
+    def _is_rms_in_process_zone(self, rms: float) -> bool:
+        """
+        Evaluasi apakah chunk audio lolos ke STT berdasarkan energi RMS.
+
+        Prioritaskan proximity_zones dari engine (dikonfigurasi admin via UI).
+        Fallback ke _DEFAULT_PROXIMITY_ZONES jika belum dikonfigurasi.
+
+        Args:
+            rms: Linear RMS energy [0.0, 1.0] dari chunk audio.
+
+        Returns:
+            True jika zona action="PROCESS", False jika "IGNORE" atau tidak cocok.
+        """
+        zones = getattr(self, "proximity_zones", None) or self._DEFAULT_PROXIMITY_ZONES
+        for zone in zones:
+            if isinstance(zone, dict):
+                min_r = float(zone.get("min_rms", 0))
+                max_r = float(zone.get("max_rms", 0))
+                action = zone.get("action", "IGNORE")
+            else:
+                min_r, max_r, action = zone[0], zone[1], zone[2]
+
+            if min_r <= rms <= max_r:
+                return action == "PROCESS"
+
+        # Tidak ada zona yang cocok → buang (safe default)
+        return False
 
     def _calculate_rms(self, audio: "sr.AudioData") -> float:
         """Calculate the Root Mean Square energy of an audio chunk.
@@ -574,35 +605,6 @@ class AudioEngine:
             logger.warning("RMS calculation failed: %s", e)
             return 0.0
 
-    def _evaluate_zone_action(self, rms_value: float) -> str:
-        """Determine whether an audio chunk should be processed or ignored.
-
-        Iterates through the proximity zones list and returns the action
-        of the first matching zone.  If no zone matches, defaults to
-        ``IGNORE`` (fallback rule per specification).
-
-        This method is called in the audio processing hot path and
-        performs **no I/O** — it only reads the in-memory zones list.
-
-        Args:
-            rms_value: The RMS energy of the audio chunk (0.0–1.0).
-
-        Returns:
-            ``"PROCESS"`` if the chunk should be sent to STT,
-            ``"IGNORE"`` otherwise.
-        """
-        zones = self._proximity_zones  # Single read (GIL-safe snapshot)
-        for zone in zones:
-            try:
-                min_rms = float(zone.get("min_rms", 0.0))
-                max_rms = float(zone.get("max_rms", 0.0))
-                if min_rms <= rms_value <= max_rms:
-                    return zone.get("action", "IGNORE")
-            except (TypeError, ValueError) as e:
-                logger.warning("Invalid zone config: %s — skipping", e)
-                continue
-        return "IGNORE"  # Fallback: no matching zone
-
     def _apply_gain(self, audio: "sr.AudioData") -> "sr.AudioData":
         try:
             raw = np.frombuffer(
@@ -620,6 +622,13 @@ class AudioEngine:
         Auto-normalisasi audio ke target RMS level.
         Mengangkat volume suara yang lemah (mic murah / jauh)
         tanpa merusak kualitas audio yang sudah cukup keras.
+
+        Perubahan T13:
+        - Batas gain MAX_NORMALIZE_GAIN = 3x (sebelumnya 20x).
+          Gain 20x hasilkan gelombang kotak (hard-clip) yang dikenali
+          Google Speech sebagai noise, bukan kata.
+        - Soft tanh limiter gantikan np.clip keras — permukaan gelombang
+          tetap melengkung alami walau amplitudo dipangkas.
 
         Cocok untuk: Fantech HQ 53, mic headset gaming ekonomi, dll.
         """
@@ -645,16 +654,18 @@ class AudioEngine:
                 # Audio already loud enough — no boost needed
                 return audio
 
-            # Convert dB gain to linear multiplier (cap at 20x / +26dB)
-            gain_linear = min(10 ** (gain_db / 20.0), 20.0)
+            # Convert dB gain to linear multiplier — cap at MAX_NORMALIZE_GAIN (3x)
+            # Sebelumnya 20x: hasilkan hard-clip kotak yang rusak akurasi STT
+            gain_linear = min(10 ** (gain_db / 20.0), MAX_NORMALIZE_GAIN)
 
-            # Apply normalization
-            normalized = raw * gain_linear
-            np.clip(normalized, -1.0, 1.0, out=normalized)
+            # Apply normalization dengan soft tanh limiter
+            # tanh: gelombang tetap melengkung alami (tidak kotak) walau dipangkas
+            normalized = np.tanh(raw * gain_linear)
+
             normalized_int16 = (normalized * 32767).astype(np.int16)
 
             logger.debug(
-                "🔊 Auto-normalize: %.1f dB → %.1f dB (gain: %.1fx)",
+                "Auto-normalize: %.1f dB -> %.1f dB (gain: %.1fx, soft-limit)",
                 current_db, TARGET_RMS_DB, gain_linear
             )
 

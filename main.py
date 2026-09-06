@@ -236,6 +236,11 @@ def main():
 
         # --- Init Services ---
         logger.info("Initializing Services...")
+        
+        # Hardening & Sovereignty
+        SystemService.set_high_priority()
+        SystemService.harden_app_directory()
+
         detector = ToxicDetector()
         logger_svc = LoggerService()
         auth_service = AuthService()
@@ -262,6 +267,7 @@ def main():
         )
         # root in PySide6 context is the QMainWindow instance
         root = dashboard
+        dashboard.is_maintenance_mode = False
         
         # --- Init Overlay & Penalty Manager ---
         overlay = LockdownOverlay(root, auth_service=auth_service)
@@ -290,7 +296,8 @@ def main():
                     root=root,
                     penalty_mgr=penalty_mgr,
                     detector=detector,
-                    app_version=f"v{APP_VERSION}"
+                    app_version=f"v{APP_VERSION}",
+                    auth_service=auth_service
                 )
                 penalty_mgr.network_client = network_client
                 logger.info("NetworkClient configured → %s:%d", server_ip, server_port)
@@ -307,7 +314,12 @@ def main():
                 return
 
             result = detector.detect(text)
-            logger_svc.log(text, result.is_toxic, result.matched_words)
+            logger_svc.log(
+                text=text, 
+                is_toxic=result.is_toxic, 
+                matched_words=result.matched_words,
+                is_near_miss=(len(result.cancelled_words) > 0)
+            )
             if result.is_toxic:
                 penalty_mgr.execute_sanction(result.matched_words)
 
@@ -334,7 +346,8 @@ def main():
         # ── Enforce toggle states from config on each startup ──
         block_settings_cfg = auth_service.get_config("BlockSettings", False)
         SystemService.toggle_windows_settings(bool(block_settings_cfg))
-        logger.info("BlockSettings enforced on startup: %s", block_settings_cfg)
+        SystemService.toggle_microphone_privacy_lock(bool(block_settings_cfg))
+        logger.info("BlockSettings & MicPrivacy enforced on startup: %s", block_settings_cfg)
 
         block_installer_cfg = auth_service.get_config("BlockInstaller", False)
         SystemService.toggle_installer_block(bool(block_installer_cfg))
@@ -348,8 +361,38 @@ def main():
             dashboard._network_client = network_client
             logger.info("✓ NetworkClient started → %s:%d", server_ip, server_port)
 
+        # ── Installer Guard Override Handler ──
+        from PySide6.QtCore import QObject, Signal
+        class BlockSignalHandler(QObject):
+            sig_request_override = Signal(str, str, str, object, object)
+            
+        block_handler = BlockSignalHandler()
+        
+        def _handle_block_request(process_name, keyword, source, result_dict, event):
+            from app.overlay import InstallerBlockDialog
+            dlg = InstallerBlockDialog(
+                process_name=process_name,
+                keyword=keyword,
+                auth_service=auth_service,
+                parent=root
+            )
+            dlg.exec()
+            result_dict['allow'] = dlg.is_allowed()
+            event.set()
+            
+        block_handler.sig_request_override.connect(_handle_block_request)
+        
+        def _on_installer_blocked(process_name, keyword, source):
+            import threading
+            event = threading.Event()
+            result_dict = {'allow': False}
+            block_handler.sig_request_override.emit(process_name, keyword, source, result_dict, event)
+            event.wait()
+            return result_dict['allow']
+
         # ── Start Installer Guard (Real-time setup execution block) ──
         installer_guard = InstallerGuard(root=root, network_client=network_client)
+        installer_guard.on_blocked_callback = _on_installer_blocked
         installer_guard.set_block_installer(bool(block_installer_cfg))
         installer_guard.set_block_settings(bool(block_settings_cfg))
         if block_installer_cfg or block_settings_cfg:
@@ -382,6 +425,7 @@ def main():
             sig_open_dashboard = Signal()
             sig_restart_engine = Signal()
             sig_exit_app = Signal()
+            sig_toggle_maintenance = Signal()
 
         tray_comm = TrayCommunicator()
 
@@ -420,6 +464,50 @@ def main():
         tray_comm.sig_restart_engine.connect(_handle_restart_engine)
         tray_comm.sig_exit_app.connect(_handle_exit_app)
 
+        # -- Maintenance Mode --
+        def get_maintenance_state(item):
+            return getattr(dashboard, "is_maintenance_mode", False)
+
+        def _handle_toggle_maintenance():
+            """Executes on MAIN thread"""
+            auth_service.logout()
+            def _on_login_success():
+                dashboard.is_maintenance_mode = not dashboard.is_maintenance_mode
+                if dashboard.is_maintenance_mode:
+                    logger.warning("⚙️ Maintenance Mode ENABLED by Admin")
+                    if hasattr(dashboard, "_installer_guard") and dashboard._installer_guard:
+                        dashboard._installer_guard.disable()
+                    if engine:
+                        engine.stop()
+                    SystemService.toggle_windows_settings(False)
+                    SystemService.toggle_installer_block(False)
+                    SystemService.unharden_app_directory()
+                else:
+                    logger.warning("⚙️ Maintenance Mode DISABLED. Protections restoring...")
+                    if hasattr(dashboard, "_installer_guard") and dashboard._installer_guard:
+                        block_installer = auth_service.get_config("BlockInstaller", False)
+                        block_settings = auth_service.get_config("BlockSettings", False)
+                        dashboard._installer_guard.reload(block_installer=block_installer, block_settings=block_settings)
+                    if engine:
+                        engine.start()
+                    SystemService.harden_app_directory()
+                
+                # Tray icon update
+                try:
+                    tray_icon.update_menu()
+                except Exception:
+                    pass
+
+            def _on_login_cancel():
+                logger.info("Maintenance toggle cancelled by user")
+                
+            show_login_dialog_async(
+                on_success=_on_login_success,
+                on_cancel=_on_login_cancel
+            )
+
+        tray_comm.sig_toggle_maintenance.connect(_handle_toggle_maintenance)
+
         def on_open_dashboard_tray(icon, item):
             """Tray → Show Dashboard (Emits signal to main thread)"""
             tray_comm.sig_open_dashboard.emit()
@@ -432,8 +520,13 @@ def main():
             """Tray → Exit (Emits signal to main thread)"""
             tray_comm.sig_exit_app.emit()
 
+        def on_toggle_maintenance_tray(icon, item):
+            """Tray → Maintenance Toggle"""
+            tray_comm.sig_toggle_maintenance.emit()
+
         tray_menu = pystray.Menu(
             pystray.MenuItem("Settings...", on_open_dashboard_tray, default=True),
+            pystray.MenuItem("Maintenance Mode", on_toggle_maintenance_tray, checked=get_maintenance_state),
             pystray.MenuItem("Restart Engine", on_restart_engine_tray),
             pystray.MenuItem("Exit", on_exit_app_tray),
         )
@@ -503,4 +596,20 @@ def main():
 
 
 if __name__ == "__main__":
+    if not check_admin():
+        import ctypes
+        import sys
+        import os
+        
+        # Prepare arguments
+        args = sys.argv[1:]
+        arg_str = " ".join([f'"{a}"' for a in args])
+        
+        # Relaunch as administrator
+        if getattr(sys, 'frozen', False):
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, arg_str, None, 1)
+        else:
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{os.path.abspath(__file__)}" {arg_str}', None, 1)
+        sys.exit(0)
+        
     main()

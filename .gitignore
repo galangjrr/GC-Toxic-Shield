@@ -30,3 +30,5 @@ logs/
 *PRD*.txt
 *.txt
 !requirements.txt
+graphify-out/
+*.pkl

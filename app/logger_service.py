@@ -165,6 +165,7 @@ class LoggerService:
         is_toxic: bool = False,
         matched_words: Optional[List[str]] = None,
         timestamp: Optional[str] = None,
+        is_near_miss: bool = False,
     ):
         """
         Mencatat hasil transkripsi.
@@ -177,6 +178,7 @@ class LoggerService:
             is_toxic: Apakah mengandung kata toxic.
             matched_words: Kata-kata toxic yang ditemukan.
             timestamp: Waktu (auto-generated jika None).
+            is_near_miss: Apakah match dibatalkan oleh context exclusion.
         """
         if not text or not text.strip():
             return
@@ -203,6 +205,8 @@ class LoggerService:
                 "📝 TOXIC logged to CSV: \"%s\" | words=%s",
                 text, matched_words
             )
+        elif is_near_miss:
+            logger.debug("📝 NEAR MISS (Context Exclusion): \"%s\"", text)
         else:
             logger.debug("📝 Safe text buffered: \"%s\"", text)
 

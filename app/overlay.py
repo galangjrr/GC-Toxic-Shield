@@ -172,9 +172,9 @@ class WarningBox(QDialog):
 
     def _timer_tick(self):
         # Selalu paksa fokus meskipun waktu hitung mundur habis agar tidak di-bypass
-        self.raise_()
-        self.activateWindow()
-        self.setFocus()
+        if not self.isActiveWindow():
+            self.raise_()
+            self.activateWindow()
         
         if self._remaining > 0:
             self._remaining -= 1
@@ -214,9 +214,9 @@ class WarningBox(QDialog):
         self._dismiss()
 
     def _enforce_focus(self):
-        self.raise_()
-        self.activateWindow()
-        self.setFocus()
+        if not self.isActiveWindow():
+            self.raise_()
+            self.activateWindow()
 
     def _dismiss(self):
         if hasattr(self, "_focus_timer"):
@@ -287,9 +287,9 @@ class SimpleWarningBox(QDialog):
         self._focus_timer.start(500)
         
     def _enforce_focus(self):
-        self.raise_()
-        self.activateWindow()
-        self.setFocus()
+        if not self.isActiveWindow():
+            self.raise_()
+            self.activateWindow()
 
     def _dismiss(self):
         if hasattr(self, "_focus_timer"):
@@ -395,7 +395,10 @@ class LockdownOverlay:
             kernel32 = ctypes.windll.kernel32
 
             def keyboard_hook_proc(nCode, wParam, lParam):
-                if nCode >= 0 and self._is_active:
+                if nCode < 0:
+                    return user32.CallNextHookEx(getattr(self, '_hook_handle', 0), nCode, wParam, lParam)
+                    
+                if self._is_active:
                     vk_code = ctypes.cast(lParam, ctypes.POINTER(ctypes.wintypes.DWORD)).contents.value
                     # Block Alt+Tab
                     if wParam == WM_SYSKEYDOWN and vk_code == VK_TAB: return 1
@@ -413,7 +416,7 @@ class LockdownOverlay:
                         ctrl = user32.GetAsyncKeyState(0x11) & 0x8000
                         shift = user32.GetAsyncKeyState(0x10) & 0x8000
                         if ctrl and shift: return 1
-                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+                return user32.CallNextHookEx(getattr(self, '_hook_handle', 0), nCode, wParam, lParam)
 
             self._hook_callback = HOOKPROC(keyboard_hook_proc)
             self._hook_handle = user32.SetWindowsHookExW(
@@ -423,8 +426,10 @@ class LockdownOverlay:
             if self._hook_handle:
                 self._hook_installed = True
             else:
+                self._hook_handle = None
                 logger.warning("Hook unavailable. Run as Admin. Continuing.")
         except Exception as e:
+            self._hook_handle = None
             logger.warning("Hook error: %s — continuing without hook", e)
 
     def _remove_keyboard_hook(self):
@@ -450,6 +455,7 @@ class LockdownWindow(QDialog):
             }
         """)
         self.setAttribute(Qt.WA_TranslucentBackground, False) # True breaks click-through sometimes, making it 95% opacity works
+        self.setWindowOpacity(0.70)
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
@@ -495,11 +501,6 @@ class LockdownWindow(QDialog):
         self._countdown_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._countdown_label)
 
-        q = QLabel(f"\"{quote}\"")
-        q.setStyleSheet("font-size: 16px; font-style: italic; color: #AAAAAA;")
-        q.setAlignment(Qt.AlignCenter)
-        layout.addWidget(q)
-
         layout.addSpacing(30)
         
         # Hidden Password Entry
@@ -534,9 +535,11 @@ class LockdownWindow(QDialog):
         self._focus_timer.start(200)
 
     def _enforce_lockdown_focus(self):
-        self.raise_()
-        self.activateWindow()
-        self.setFocus()
+        if not self.isActiveWindow():
+            self.raise_()
+            self.activateWindow()
+        if not self._password_entry.hasFocus():
+            self._password_entry.setFocus()
 
     def _timer_tick(self):
         if self._manager._remaining_seconds <= 0:
@@ -584,3 +587,196 @@ class LockdownWindow(QDialog):
                 rem_att = manager.MAX_OVERRIDE_ATTEMPTS - manager._override_attempt_count
                 self._status_label.setText(f"Password salah! Sisa percobaan: {rem_att}")
             self._password_entry.clear()
+
+
+# ================================================================
+# INSTALLER BLOCK DIALOG (Custom Blocker Dialog)
+# ================================================================
+
+class InstallerBlockDialog(QDialog):
+    """
+    Jendela konfirmasi ketika installer terblokir.
+    Menampilkan info aplikasi, password field, dan 2 tombol (Izinkan/Batal).
+    Undecorated, modal overlay dengan tampilan premium.
+    """
+    def __init__(self, process_name: str, keyword: str, auth_service, parent=None):
+        super().__init__(parent)
+        self._auth = auth_service
+        self._process_name = process_name
+        self._keyword = keyword
+        self._allowed = False
+
+        # Set Window Title (for taskbar, etc. though undecorated)
+        self.setWindowTitle("Shield Blocked Executable")
+
+        # Frameless, on top, stays modal
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFixedSize(500, 320)
+
+        # Center on screen
+        if parent:
+            self.move(parent.geometry().center() - self.rect().center())
+        else:
+            screen_geom = QApplication.primaryScreen().geometry()
+            x = (screen_geom.width() - self.width()) // 2
+            y = (screen_geom.height() - self.height()) // 2
+            self.move(x, y)
+
+        self._build_ui()
+        self.setWindowModality(Qt.ApplicationModal)
+        
+        # Enforce focus on the dialog
+        self._focus_timer = QTimer(self)
+        self._focus_timer.timeout.connect(self._enforce_focus)
+        self._focus_timer.start(300)
+
+    def _build_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        card = QFrame()
+        card.setObjectName("MainCard")
+        card.setFixedSize(500, 320)
+        card.setStyleSheet("""
+            QFrame#MainCard {
+                background-color: #0D1117;
+                color: #C9D1D9;
+                border-radius: 12px;
+                border: 2px solid #F85149;
+            }
+        """)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(15)
+
+        # Header Title
+        title_lbl = QLabel("🛡️ GC TOXIC SHIELD")
+        title_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #F85149; border: none; background: transparent;")
+        title_lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_lbl)
+
+        # Subtitle / Warning Message
+        msg_title = QLabel("Proses Installer Ditangguhkan")
+        msg_title.setStyleSheet("font-size: 20px; font-weight: 800; color: #FFFFFF; border: none; background: transparent;")
+        msg_title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(msg_title)
+
+        # Info Box
+        info_txt = f"Aplikasi <b>{self._process_name}</b> terdeteksi sebagai installer/setup dan telah ditangguhkan sementara.<br>Masukkan password Admin untuk melanjutkan, atau klik Batal untuk memblokirnya secara total."
+        info_lbl = QLabel(info_txt)
+        info_lbl.setStyleSheet("font-size: 13px; color: #8B949E; line-height: 18px; border: none; background: transparent;")
+        info_lbl.setAlignment(Qt.AlignCenter)
+        info_lbl.setWordWrap(True)
+        layout.addWidget(info_lbl)
+
+        # Password Entry
+        self._password_entry = QLineEdit()
+        self._password_entry.setPlaceholderText("Password Administrator...")
+        self._password_entry.setEchoMode(QLineEdit.Password)
+        self._password_entry.setStyleSheet("""
+            QLineEdit {
+                background-color: #161B22;
+                color: #FFFFFF;
+                border: 1px solid #30363D;
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #58A6FF;
+            }
+        """)
+        self._password_entry.returnPressed.connect(self._verify_and_allow)
+        layout.addWidget(self._password_entry)
+
+        # Error / Status message field
+        self._status_lbl = QLabel("")
+        self._status_lbl.setStyleSheet("font-size: 12px; color: #F85149; border: none; background: transparent; font-weight: bold;")
+        self._status_lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self._status_lbl)
+
+        # Button Layout (HBox)
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(15)
+
+        self._btn_cancel = QPushButton("Batal / Blokir")
+        self._btn_cancel.setFixedHeight(38)
+        self._btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #21262D;
+                color: #C9D1D9;
+                border: 1px solid #30363D;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #30363D;
+            }
+        """)
+        self._btn_cancel.clicked.connect(self._cancel)
+        btn_layout.addWidget(self._btn_cancel)
+
+        self._btn_allow = QPushButton("Izinkan Pengeksekusian")
+        self._btn_allow.setFixedHeight(38)
+        self._btn_allow.setStyleSheet("""
+            QPushButton {
+                background-color: #238636;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2EA043;
+            }
+        """)
+        self._btn_allow.clicked.connect(self._verify_and_allow)
+        btn_layout.addWidget(self._btn_allow)
+
+        layout.addLayout(btn_layout)
+        main_layout.addWidget(card)
+
+        # Set autofocus
+        QTimer.singleShot(100, self._password_entry.setFocus)
+
+    def _enforce_focus(self):
+        if not self.isActiveWindow():
+            self.raise_()
+            self.activateWindow()
+        if not self._password_entry.hasFocus():
+            self._password_entry.setFocus()
+
+    def _verify_and_allow(self):
+        pwd = self._password_entry.text().strip()
+        if not pwd:
+            self._status_lbl.setText("Password tidak boleh kosong!")
+            return
+
+        # Check password against auth service
+        if self._auth.verify_password(pwd):
+            self._allowed = True
+            self._cleanup_and_close(QDialog.Accepted)
+        else:
+            self._status_lbl.setText("Password Administrator salah!")
+            self._password_entry.clear()
+            self._password_entry.setFocus()
+
+    def _cancel(self):
+        self._allowed = False
+        self._cleanup_and_close(QDialog.Rejected)
+
+    def _cleanup_and_close(self, code):
+        if hasattr(self, "_focus_timer"):
+            self._focus_timer.stop()
+        self.done(code)
+
+    def is_allowed(self) -> bool:
+        return self._allowed
+
+    def closeEvent(self, event):
+        self._cancel()
+        event.accept()
+

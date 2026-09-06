@@ -41,6 +41,7 @@ class DetectionResult:
     is_toxic: bool
     original_text: str
     matched_words: List[str] = field(default_factory=list)
+    cancelled_words: List[str] = field(default_factory=list)
     timestamp: str = ""
 
     def __post_init__(self):
@@ -82,6 +83,32 @@ class ToxicDetector:
         self._context_exclusions: dict = {}
 
         self._load_wordlist()
+        
+        self._ai_detector = None
+        self._init_ai_detector()
+
+    def _init_ai_detector(self):
+        try:
+            from app.nlp_detector import NLPDetector
+            import os
+            model_path = os.path.join(os.getcwd(), "nlp_model.pkl")
+            if os.path.exists(model_path):
+                self._ai_detector = NLPDetector(model_path=model_path)
+                if not self._ai_detector.is_loaded:
+                    self._ai_detector = None
+        except ImportError:
+            self._ai_detector = None
+            
+    def reload_ai_model(self, model_path):
+        try:
+            from app.nlp_detector import NLPDetector
+            self._ai_detector = NLPDetector(model_path=model_path)
+            if self._ai_detector.is_loaded:
+                logger.info("AI NLP Model di-reload dengan sukses!")
+            else:
+                self._ai_detector = None
+        except Exception as e:
+            logger.error(f"Gagal reload AI: {e}")
 
     # ================================================================
     # PUBLIC API
@@ -106,26 +133,52 @@ class ToxicDetector:
                 original_text=text or "",
             )
 
-        # ── T12: Pre-processing Pipeline ──
-        # All of this is now handled by normalize_stt_text which can be called externally too.
-        mapped_text = self.normalize_stt_text(text)
+        # ── Pre-processing Pipeline ──
+        cleaned_text = self._normalize_text(text)
+        mapped_text = self._apply_phonetic_mapping(cleaned_text)
 
-        # 3. Remove allowed words mapping
-        for word, pattern in self._allowed_patterns:
-            mapped_text = pattern.sub("", mapped_text)
+        # Simpan teks asli (post-mapping) untuk context exclusion & log.
+        # JANGAN mutasi mapped_text dengan menghapus allowed words dari string!
+        # Penghapusan sebelumnya menyebabkan kata konteks seperti 'honda', 'kentang'
+        # hilang dari teks sebelum context_exclusion sempat diperiksa → root cause
+        # false positive 'dealer honda' dan 'peeler kentang'.
+        detection_text = mapped_text
 
         matched = []
+        is_toxic = False
+
+        # O(1) Performance via Python Sets untuk kata tunggal
+        words_set = set(re.findall(r'\b\w+\b', detection_text.lower()))
 
         for word, pattern in self._patterns:
-            if pattern.search(mapped_text):
-                matched.append(word)
+            # Skip: kata ini ada di allowed_words → bukan kata kotor
+            if word in self._allowed_words:
+                continue
+            if " " not in word:
+                if word in words_set:
+                    matched.append(word)
+            else:
+                if pattern.search(detection_text):
+                    matched.append(word)
 
-        # ── Context Exclusion: remove false positives ──
-        # If a matched toxic word has context exclusion words and
-        # ANY of those words appear in the full text, cancel the match.
+        # ── NLP Fallback: DINONAKTIFKAN ──
+        # Model sklearn lokal (nlp_model.pkl) terbukti tidak akurat:
+        # - 'player satu mau main' → diprediksi TOXIC (salah)
+        # - 'kontol anjing' → diprediksi SAFE (salah)
+        # Akurasi model di bawah batas layak pakai. Jangan aktifkan kembali
+        # sebelum model dilatih ulang dengan dataset warnet yang representatif.
+        # if self._ai_detector and getattr(self._ai_detector, 'is_loaded', False):
+        #     is_toxic_ai = self._ai_detector.is_toxic(detection_text)
+        #     if is_toxic_ai and not matched:
+        #         matched = ["[AI_DETECTED]"]
+
+        # ── Context Exclusion: batalkan false positives ──
+        # Jika kata toxic punya konteks pelindung dan kata konteks itu
+        # ADA di detection_text (yang TIDAK dimutasi) → batalkan match.
+        cancelled = []
         if matched and self._context_exclusions:
             filtered = []
-            text_lower = mapped_text.lower()
+            text_lower = detection_text.lower()
             for word in matched:
                 exclusions = self._context_exclusions.get(word, [])
                 if exclusions and any(ctx in text_lower for ctx in exclusions):
@@ -133,6 +186,7 @@ class ToxicDetector:
                         "Context exclusion: '%s' cancelled (context word found in text)",
                         word
                     )
+                    cancelled.append(word)
                     continue
                 filtered.append(word)
             matched = filtered
@@ -143,6 +197,7 @@ class ToxicDetector:
             is_toxic=is_toxic,
             original_text=text,
             matched_words=matched,
+            cancelled_words=cancelled,
         )
 
         if is_toxic:
@@ -281,6 +336,15 @@ class ToxicDetector:
                             w.lower().strip() for w in ctx_words if isinstance(w, str) and w.strip()
                         ]
 
+            # Pre-compile phonetic mapping patterns
+            self._phonetic_patterns = []
+            for misheard, real_word in self._phonetic_map.items():
+                try:
+                    pat = re.compile(r'\b' + re.escape(misheard) + r'\b', re.IGNORECASE)
+                    self._phonetic_patterns.append((pat, real_word))
+                except re.error as e:
+                    logger.warning("Invalid regex for phonetic map '%s': %s", misheard, e)
+
             logger.info(
                 "✓ Wordlist loaded: %d toxic words, %d mapping, %d allowed, %d context_exclusions from %s",
                 len(self._toxic_words),
@@ -295,6 +359,7 @@ class ToxicDetector:
             self._toxic_words = []
             self._patterns = []
             self._phonetic_map = {}
+            self._phonetic_patterns = []
             self._allowed_words = []
             self._allowed_patterns = []
             self._context_exclusions = {}
@@ -304,6 +369,7 @@ class ToxicDetector:
             self._toxic_words = []
             self._patterns = []
             self._phonetic_map = {}
+            self._phonetic_patterns = []
             self._allowed_words = []
             self._allowed_patterns = []
             self._context_exclusions = {}
@@ -312,15 +378,11 @@ class ToxicDetector:
         """
         Normalisasi teks:
         1. Lowercase
-        2. Condense repeated chars > 2 (e.g. "anjiiiing" -> "anjing")
+        2. Reduksi karakter berulang — tangkap teriakan STT seperti
+           'kontooool' → 'kontol', 'anjinggg' → 'anjing'
         """
         text = text.lower().strip()
-        # Regex: (karakter apa saja)\1{2,} -> ganti dengan \1
-        # Mengubah 3+ karakter sama berturut-turut jadi 1
-        # Contoh: anjiiiing -> anjing, gobloook -> goblok
-        # Note: Kita sisakan 1 char, karena bahasa Indonesia jarang double char
-        # kecuali 'taat', 'maaf'. Tapi user toxic biasanya 'anjiiiing'.
-        # Safe bet: reduce to 1 or 2. Let's reduce to 1 for simplicity regarding slang.
+        # Collapse 3+ karakter berulang jadi 1 — cegah STT bypass via teriakan vokal panjang
         text = re.sub(r'(.)\1{2,}', r'\1', text)
         return text
 
@@ -330,16 +392,10 @@ class ToxicDetector:
         Contoh: "peeler" -> "peler", "fill" -> "itil"
         (Diambil dari word_list.json → phonetic_mapping)
         """
-        words = text.split()
-        new_words = []
-        for w in words:
-            w_lower = w.lower()
-            if w_lower in self._phonetic_map:
-                new_words.append(self._phonetic_map[w_lower])
-            else:
-                new_words.append(w)
-        
-        return " ".join(new_words)
+        new_text = text
+        for pat, real_word in getattr(self, '_phonetic_patterns', []):
+            new_text = pat.sub(real_word, new_text)
+        return new_text
 
 
 # ================================================================

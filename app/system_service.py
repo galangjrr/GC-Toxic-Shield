@@ -238,6 +238,97 @@ class SystemService:
             return False
 
     # ================================================================
+    # MICROPHONE PRIVACY POLICY — LOCK MICROPHONE ACCESS TOGGLE
+    # ================================================================
+
+    POLICIES_APPPRIVACY_PATH = r"SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
+
+    @staticmethod
+    def toggle_microphone_privacy_lock(enable_lock: bool) -> bool:
+        """
+        Kunci atau buka izin Microphone Privacy di Windows Settings (HKLM).
+        Reversibel 100% dan tidak merusak sistem registry:
+        
+        enable_lock = True:
+            Set LetAppsAccessMicrophone = 1 (REG_DWORD)
+            -> Force Allow: toggle 'Microphone access' di Windows Settings
+               dikunci ON dan membeku abu-abu ('Some of these settings are managed by your organization').
+        enable_lock = False:
+            Hapus nilai LetAppsAccessMicrophone (clean rollback)
+            -> Mengembalikan kontrol normal ke user.
+        """
+        try:
+            import winreg
+            import ctypes
+
+            if enable_lock:
+                key = winreg.CreateKeyEx(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    SystemService.POLICIES_APPPRIVACY_PATH,
+                    0,
+                    winreg.KEY_SET_VALUE,
+                )
+                winreg.SetValueEx(key, "LetAppsAccessMicrophone", 0, winreg.REG_DWORD, 1)
+                winreg.CloseKey(key)
+                logger.info("✓ Microphone Privacy LOCKED (LetAppsAccessMicrophone=1)")
+            else:
+                try:
+                    key = winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        SystemService.POLICIES_APPPRIVACY_PATH,
+                        0,
+                        winreg.KEY_SET_VALUE,
+                    )
+                    winreg.DeleteValue(key, "LetAppsAccessMicrophone")
+                    winreg.CloseKey(key)
+                    logger.info("✓ Microphone Privacy UNLOCKED (LetAppsAccessMicrophone removed)")
+                except FileNotFoundError:
+                    pass
+
+            # Siarkan sinyal WM_SETTINGCHANGE agar Windows langsung refresh seketika
+            HWND_BROADCAST = 0xFFFF
+            WM_SETTINGCHANGE = 0x001A
+            SMTO_ABORTIFHUNG = 0x0002
+            try:
+                ctypes.windll.user32.SendMessageTimeoutW(
+                    HWND_BROADCAST,
+                    WM_SETTINGCHANGE,
+                    0,
+                    "Policy",
+                    SMTO_ABORTIFHUNG,
+                    3000,
+                    None,
+                )
+            except Exception:
+                pass
+
+            return True
+
+        except PermissionError:
+            logger.warning("Permission denied writing HKLM policy — run as Administrator")
+            return False
+        except Exception as e:
+            logger.error("Failed to toggle microphone privacy lock: %s", e)
+            return False
+
+    @staticmethod
+    def is_microphone_privacy_locked() -> bool:
+        """Cek apakah Microphone Privacy sedang terkunci di Registry (HKLM)."""
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                SystemService.POLICIES_APPPRIVACY_PATH,
+                0,
+                winreg.KEY_READ,
+            )
+            val, _ = winreg.QueryValueEx(key, "LetAppsAccessMicrophone")
+            winreg.CloseKey(key)
+            return val == 1
+        except Exception:
+            return False
+
+    # ================================================================
     # INSTALLER BLOCKER (MSI & EXE)
     # ================================================================
 
@@ -438,3 +529,68 @@ class SystemService:
 
         # Exit
         sys.exit(0)
+
+    # ================================================================
+    # APP SOVEREIGNTY & HARDENING
+    # ================================================================
+
+    @staticmethod
+    def harden_app_directory():
+        """
+        Melindungi folder instalasi agar tidak bisa dihapus oleh siapapun (termasuk Antivirus),
+        serta menetapkan status kedaulatan tinggi.
+        """
+        try:
+            import subprocess
+            if getattr(sys, 'frozen', False):
+                app_dir = os.path.dirname(sys.executable)
+            else:
+                app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            # Gunakan icacls untuk menolak izin Delete (DE) untuk Everyone
+            # Tanpa /T agar tidak mengunci file temporer/cache di dalam subfolder yang mungkin dibutuhkan sistem
+            cmd = f'icacls "{app_dir}" /deny Everyone:(DE) /C /Q'
+            subprocess.run(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            logger.info("✓ Folder hardened: %s", app_dir)
+            return True
+        except Exception as e:
+            logger.error("Failed to harden app directory: %s", e)
+            return False
+
+    @staticmethod
+    def unharden_app_directory():
+        """
+        Melepas perlindungan folder saat Maintenance Mode.
+        """
+        try:
+            import subprocess
+            if getattr(sys, 'frozen', False):
+                app_dir = os.path.dirname(sys.executable)
+            else:
+                app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            # Hapus rule deny dari folder
+            cmd = f'icacls "{app_dir}" /remove:d Everyone /C /Q'
+            subprocess.run(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            logger.info("✓ Folder unhardened: %s", app_dir)
+            return True
+        except Exception as e:
+            logger.error("Failed to unharden app directory: %s", e)
+            return False
+
+    @staticmethod
+    def set_high_priority():
+        """
+        Menyetel proses aplikasi menjadi Above Normal Priority.
+        Catatan: Tidak menggunakan HIGH_PRIORITY agar tidak menyebabkan audio driver starvation.
+        """
+        try:
+            import psutil
+            p = psutil.Process(os.getpid())
+            # Menggunakan ABOVE_NORMAL_PRIORITY_CLASS (0x00008000) agar aman untuk Audio Driver
+            p.nice(psutil.ABOVE_NORMAL_PRIORITY_CLASS)
+            logger.info("✓ Process priority set to ABOVE_NORMAL")
+            return True
+        except Exception as e:
+            logger.error("Failed to set high priority: %s", e)
+            return False

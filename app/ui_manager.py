@@ -331,7 +331,6 @@ class AdminDashboard(QMainWindow):
             ("🛡 Installer Guard", 2),
             ("📜 Daftar Sanksi", 3),
             ("⚙ Pengaturan", 4),
-            ("🎚 Proximity Filter", 5),
         ]
 
         for label, index in tabs:
@@ -386,7 +385,6 @@ class AdminDashboard(QMainWindow):
         self._build_installer_guard_tab()
         self._build_sanctions_tab()
         self._build_settings_tab()
-        self._build_proximity_filter_tab()
 
     def _build_status_bar(self):
         bar = QFrame()
@@ -419,8 +417,7 @@ class AdminDashboard(QMainWindow):
             "📝 Manajemen Sensor Kata",
             "🛡 Installer Guard Blokir Pihak Ke-3",
             "📜 Konfigurasi Sistem Sanksi",
-            "⚙ Pengaturan Admin",
-            "🎚 Dynamic Proximity Filter"
+            "⚙ Pengaturan Admin"
         ]
         if 0 <= index < len(titles):
             self._header_title_label.setText(titles[index])
@@ -838,7 +835,16 @@ class AdminDashboard(QMainWindow):
 
     def _build_installer_guard_tab(self):
         page = QWidget()
-        layout = QVBoxLayout(page)
+        main_layout = QVBoxLayout(page)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background-color: transparent;")
+        
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
         
         # Helper function to create a table setup
         def setup_guard_table(title, color, attr_name):
@@ -875,22 +881,13 @@ class AdminDashboard(QMainWindow):
             
             return card
 
-        # Top Row (Full Width): Blacklist
-        top_card = setup_guard_table("⛔ Blacklist Kata Kunci (setup, installer, dll)", DANGER, "_guard_blacklist_textbox")
+        # Top Row: Custom Blacklist
+        top_card = setup_guard_table("⛔ Daftar Hitam Kustom (cth: tiktok live studio)", DANGER, "_guard_blacklist_textbox")
         layout.addWidget(top_card, 1)
 
-        # Bottom Row (Split 50:50): Whitelist Processes & Paths
-        bottom_row = QWidget()
-        b_lyt = QHBoxLayout(bottom_row)
-        b_lyt.setContentsMargins(0, 0, 0, 0)
-        
-        card_proc = setup_guard_table("✅ Whitelist Proses (robloxplayerbeta, dll)", SUCCESS, "_guard_whitelist_proc_textbox")
-        card_path = setup_guard_table("🔵 Whitelist Paths (c:\\windows\\, dll)", ACCENT, "_guard_whitelist_path_textbox")
-        
-        b_lyt.addWidget(card_proc)
-        b_lyt.addWidget(card_path)
-        
-        layout.addWidget(bottom_row, 1)
+        # Bottom Row: Unified Whitelist
+        bottom_card = setup_guard_table("✅ Pengecualian / Whitelist (cth: D:\\Games\\ atau game.exe)", SUCCESS, "_guard_whitelist_textbox")
+        layout.addWidget(bottom_card, 1)
 
         # Buttons
         btn_frame = QWidget()
@@ -918,6 +915,9 @@ class AdminDashboard(QMainWindow):
         btn_lyt.addStretch()
         layout.addWidget(btn_frame)
 
+        scroll.setWidget(content_widget)
+        main_layout.addWidget(scroll)
+
         self.stack.addWidget(page)
 
     def _import_guard_config_json(self):
@@ -941,8 +941,10 @@ class AdminDashboard(QMainWindow):
                     
             if hasattr(self, '_guard_blacklist_textbox'):
                 populate(self._guard_blacklist_textbox, config.get("blacklist", []))
-                populate(self._guard_whitelist_proc_textbox, config.get("whitelist_processes", []))
-                populate(self._guard_whitelist_path_textbox, config.get("whitelist_paths", []))
+                
+                unified_whitelist = config.get("whitelist_processes", []) + config.get("whitelist_paths", [])
+                if hasattr(self, '_guard_whitelist_textbox'):
+                    populate(self._guard_whitelist_textbox, unified_whitelist)
                 
             QMessageBox.information(self, "Preview Import", "Berhasil pratinjau data Installer Guard dari file.\nSilakan tekan 'Simpan' untuk menerapkannya secara permanen.")
         except Exception as e:
@@ -957,8 +959,9 @@ class AdminDashboard(QMainWindow):
                     table.setItem(i, 0, QTableWidgetItem(it))
                     
             populate(self._guard_blacklist_textbox, config.get("blacklist", []))
-            populate(self._guard_whitelist_proc_textbox, config.get("whitelist_processes", []))
-            populate(self._guard_whitelist_path_textbox, config.get("whitelist_paths", []))
+            unified = config.get("whitelist_processes", []) + config.get("whitelist_paths", [])
+            if hasattr(self, '_guard_whitelist_textbox'):
+                populate(self._guard_whitelist_textbox, unified)
 
     def _load_guard_config(self) -> dict:
         from app._paths import GUARD_CONFIG_PATH
@@ -968,21 +971,23 @@ class AdminDashboard(QMainWindow):
                     return json.load(f)
             except Exception as e:
                 logger.error("Failed to load guard config: %s", e)
-        if self._installer_guard:
-            return {
-                "blacklist": self._installer_guard.blacklist,
-                "whitelist_processes": list(self._installer_guard.whitelist_processes),
-                "whitelist_paths": self._installer_guard.whitelist_paths
-            }
+        # HIDE SYSTEM DEFAULTS: Only show custom rules
         return {"blacklist": [], "whitelist_processes": [], "whitelist_paths": []}
 
     def _save_guard_config(self):
         from app._paths import GUARD_CONFIG_PATH
         try:
             bl = self._get_table_words(self._guard_blacklist_textbox)
-            pr = self._get_table_words(self._guard_whitelist_proc_textbox)
-            pa = self._get_table_words(self._guard_whitelist_path_textbox)
+            unified = self._get_table_words(self._guard_whitelist_textbox)
             
+            pr = []
+            pa = []
+            for item in unified:
+                if "\\" in item or ":" in item or "/" in item:
+                    pa.append(item)
+                else:
+                    pr.append(item)
+                    
             config = {"blacklist": bl, "whitelist_processes": pr, "whitelist_paths": pa}
             with open(GUARD_CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
@@ -1222,290 +1227,12 @@ class AdminDashboard(QMainWindow):
             logger.error("Failed to save sanctions config: %s", e)
 
     def set_audio_engine(self, engine: "AudioEngine") -> None:
-        """Set the audio engine reference and initialize proximity zones.
-
-        Loads persisted zone configuration from config and syncs it
-        to both the engine and the UI widgets.
-
-        Args:
-            engine: AudioEngine instance.
-        """
+        """Set the audio engine reference."""
         self._engine = engine
         self.audio_engine = engine
         self.sync_audio_ui()
-        self._populate_proximity_zones()
 
-    # ================================================================
-    # TAB 6: PROXIMITY FILTER
-    # ================================================================
 
-    def _build_proximity_filter_tab(self) -> None:
-        """Build the Proximity Filter tab with real-time VU meter and zone builder.
-
-        The tab consists of:
-        - A real-time VU meter showing raw RMS values (0.0–1.0).
-        - A dynamic zone builder where users can add, edit, and remove
-          energy zones with PROCESS or IGNORE actions.
-        """
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 10)
-
-        # ── Real-time VU Meter Card ──
-        vu_card = QFrame()
-        vu_card.setProperty("class", "Card")
-        vu_card.setGraphicsEffect(create_shadow())
-        vu_card.setFixedHeight(80)
-        vu_lyt = QVBoxLayout(vu_card)
-        vu_lyt.setContentsMargins(12, 8, 12, 8)
-
-        top_row = QHBoxLayout()
-        lbl_vu = QLabel("🎚 Real-time Audio Level (Raw RMS)")
-        lbl_vu.setProperty("class", "H3")
-        top_row.addWidget(lbl_vu)
-        top_row.addStretch()
-
-        self._prox_rms_label = QLabel("RMS: 0.0000")
-        self._prox_rms_label.setStyleSheet(
-            f"color: {ACCENT}; font-weight: bold; "
-            f"font-family: Consolas; font-size: 13px;"
-        )
-        top_row.addWidget(self._prox_rms_label)
-        vu_lyt.addLayout(top_row)
-
-        self._prox_vu_progress = QProgressBar()
-        self._prox_vu_progress.setFixedHeight(20)
-        self._prox_vu_progress.setTextVisible(False)
-        self._prox_vu_progress.setRange(0, 100)
-        self._prox_vu_progress.setStyleSheet(f"""
-            QProgressBar {{ border: 1px solid {BORDER}; border-radius: 4px; background-color: {BG}; }}
-            QProgressBar::chunk {{ background-color: {ACCENT}; border-radius: 3px; }}
-        """)
-        vu_lyt.addWidget(self._prox_vu_progress)
-        layout.addWidget(vu_card)
-
-        # ── Zone Builder Card ──
-        zone_card = QFrame()
-        zone_card.setProperty("class", "Card")
-        zone_card.setGraphicsEffect(create_shadow())
-        zone_lyt = QVBoxLayout(zone_card)
-        zone_lyt.setContentsMargins(12, 10, 12, 10)
-
-        zone_title_row = QHBoxLayout()
-        lbl_zones = QLabel("📐 Zone Configuration")
-        lbl_zones.setProperty("class", "H3")
-        zone_title_row.addWidget(lbl_zones)
-        zone_title_row.addStretch()
-
-        btn_add_zone = QPushButton("➕ Add New Zone")
-        btn_add_zone.setProperty("class", "ActionBtn BtnSuccess")
-        btn_add_zone.setFixedSize(150, 30)
-        btn_add_zone.clicked.connect(self._add_proximity_zone)
-        zone_title_row.addWidget(btn_add_zone)
-        zone_lyt.addLayout(zone_title_row)
-
-        # Header row
-        header = QHBoxLayout()
-        header.setSpacing(6)
-        for text, width in [("Nama Zona", 140), ("Min RMS", 90), ("Max RMS", 90), ("Action", 100), ("", 32)]:
-            lbl = QLabel(text)
-            lbl.setProperty("class", "Muted")
-            lbl.setFixedWidth(width)
-            header.addWidget(lbl)
-        header.addStretch()
-        zone_lyt.addLayout(header)
-
-        # Scroll area for zone rows
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
-
-        self._zone_container = QWidget()
-        self._zone_rows_layout = QVBoxLayout(self._zone_container)
-        self._zone_rows_layout.setContentsMargins(0, 0, 0, 0)
-        self._zone_rows_layout.setSpacing(4)
-        self._zone_rows_layout.addStretch()
-
-        scroll.setWidget(self._zone_container)
-        zone_lyt.addWidget(scroll, 1)
-
-        layout.addWidget(zone_card, 1)
-        self.stack.addWidget(page)
-
-        # Zone row widget storage
-        self._zone_row_widgets: List[Dict[str, Any]] = []
-
-    def _create_zone_row(self, zone: Dict[str, Any]) -> None:
-        """Create a single zone row with interactive widgets.
-
-        Each row contains: name entry, min/max RMS spinboxes,
-        action dropdown, and a delete button.  All value-change
-        signals are connected to ``_sync_zones_to_engine``.
-
-        Args:
-            zone: Zone dict with keys id, name, min_rms, max_rms, action.
-        """
-        row_widget = QWidget()
-        row_lyt = QHBoxLayout(row_widget)
-        row_lyt.setContentsMargins(0, 2, 0, 2)
-        row_lyt.setSpacing(6)
-
-        name_edit = QLineEdit(zone.get("name", ""))
-        name_edit.setFixedWidth(140)
-        name_edit.textChanged.connect(lambda _: self._sync_zones_to_engine())
-        row_lyt.addWidget(name_edit)
-
-        min_spin = QDoubleSpinBox()
-        min_spin.setRange(0.00, 1.00)
-        min_spin.setSingleStep(0.01)
-        min_spin.setDecimals(2)
-        min_spin.setValue(float(zone.get("min_rms", 0.00)))
-        min_spin.setFixedWidth(90)
-        min_spin.valueChanged.connect(lambda _: self._sync_zones_to_engine())
-        row_lyt.addWidget(min_spin)
-
-        max_spin = QDoubleSpinBox()
-        max_spin.setRange(0.00, 1.00)
-        max_spin.setSingleStep(0.01)
-        max_spin.setDecimals(2)
-        max_spin.setValue(float(zone.get("max_rms", 0.10)))
-        max_spin.setFixedWidth(90)
-        max_spin.valueChanged.connect(lambda _: self._sync_zones_to_engine())
-        row_lyt.addWidget(max_spin)
-
-        action_combo = QComboBox()
-        action_combo.addItems(["PROCESS", "IGNORE"])
-        action_combo.setCurrentText(zone.get("action", "IGNORE"))
-        action_combo.setFixedWidth(100)
-        action_combo.currentTextChanged.connect(
-            lambda _: self._sync_zones_to_engine()
-        )
-        row_lyt.addWidget(action_combo)
-
-        btn_del = QPushButton("🗑")
-        btn_del.setFixedSize(32, 28)
-        btn_del.setProperty("class", "ActionBtn BtnDanger")
-        btn_del.clicked.connect(
-            lambda checked=False, w=row_widget: self._remove_proximity_zone(w)
-        )
-        row_lyt.addWidget(btn_del)
-
-        row_lyt.addStretch()
-
-        row_data: Dict[str, Any] = {
-            "widget": row_widget,
-            "name": name_edit,
-            "min_rms": min_spin,
-            "max_rms": max_spin,
-            "action": action_combo,
-        }
-        self._zone_row_widgets.append(row_data)
-
-        idx = self._zone_rows_layout.count() - 1
-        self._zone_rows_layout.insertWidget(idx, row_widget)
-
-    def _add_proximity_zone(self) -> None:
-        """Add a new zone with safe defaults and sync to engine."""
-        zone_count = len(self._zone_row_widgets)
-        zone: Dict[str, Any] = {
-            "id": f"zone_{zone_count + 1}",
-            "name": f"New Zone {zone_count + 1}",
-            "min_rms": 0.00,
-            "max_rms": 0.10,
-            "action": "IGNORE",
-        }
-        self._create_zone_row(zone)
-        self._sync_zones_to_engine()
-
-    def _remove_proximity_zone(self, row_widget: QWidget) -> None:
-        """Remove a zone row from the UI and sync to engine.
-
-        Args:
-            row_widget: The QWidget of the zone row to remove.
-        """
-        self._zone_row_widgets = [
-            r for r in self._zone_row_widgets
-            if r["widget"] is not row_widget
-        ]
-        self._zone_rows_layout.removeWidget(row_widget)
-        row_widget.deleteLater()
-        self._sync_zones_to_engine()
-
-    def _sync_zones_to_engine(self) -> None:
-        """Synchronize zone configuration from UI widgets to engine and config.
-
-        Called on every UI interaction (value change, add, delete).
-        Validates that min_rms <= max_rms per row and auto-corrects.
-        Persists the updated zones to config.json via auth_service.
-        """
-        zones: List[Dict[str, Any]] = []
-        for i, row in enumerate(self._zone_row_widgets):
-            min_val = row["min_rms"].value()
-            max_val = row["max_rms"].value()
-
-            # Auto-correct: ensure min <= max
-            if min_val > max_val:
-                row["max_rms"].blockSignals(True)
-                row["max_rms"].setValue(min_val)
-                row["max_rms"].blockSignals(False)
-                max_val = min_val
-
-            zone: Dict[str, Any] = {
-                "id": f"zone_{i + 1}",
-                "name": row["name"].text().strip() or f"Zone {i + 1}",
-                "min_rms": round(min_val, 2),
-                "max_rms": round(max_val, 2),
-                "action": row["action"].currentText(),
-            }
-            zones.append(zone)
-
-        # Update engine in-memory (no I/O)
-        if self._engine and hasattr(self._engine, 'proximity_zones'):
-            self._engine.proximity_zones = zones
-
-        # Persist to config
-        if self._auth:
-            try:
-                self._auth.update_config("proximity_zones", zones)
-            except Exception as e:
-                logger.error("Failed to persist proximity zones: %s", e)
-
-    def _populate_proximity_zones(self) -> None:
-        """Load zones from config and populate the UI rows.
-
-        Called once on ``set_audio_engine`` to bootstrap the tab
-        with persisted (or default) zone configuration.
-        """
-        if not hasattr(self, '_zone_row_widgets'):
-            return
-
-        # Clear existing rows
-        for row in self._zone_row_widgets:
-            row["widget"].deleteLater()
-        self._zone_row_widgets = []
-
-        # Load from config or use defaults
-        zones: List[Dict[str, Any]] = []
-        if self._auth:
-            saved = self._auth.get_config("proximity_zones")
-            if isinstance(saved, list) and saved:
-                zones = saved
-
-        if not zones:
-            zones = [
-                {"id": "zone_1", "name": "Background Noise", "min_rms": 0.00, "max_rms": 0.05, "action": "IGNORE"},
-                {"id": "zone_2", "name": "User Voice", "min_rms": 0.06, "max_rms": 0.30, "action": "PROCESS"},
-                {"id": "zone_3", "name": "Distant Yell", "min_rms": 0.31, "max_rms": 0.45, "action": "IGNORE"},
-                {"id": "zone_4", "name": "User Yell", "min_rms": 0.46, "max_rms": 1.00, "action": "PROCESS"},
-            ]
-
-        for zone in zones:
-            self._create_zone_row(zone)
-
-        # Sync to engine
-        if self._engine and hasattr(self._engine, 'proximity_zones'):
-            self._engine.proximity_zones = zones
 
     # ================================================================
     # TAB 7: PENGATURAN
@@ -1631,11 +1358,14 @@ class AdminDashboard(QMainWindow):
         c3_lyt.addWidget(self._chk_auto)
         
         self._chk_lock = QCheckBox("Kunci Windows Settings")
-        self._chk_lock.setChecked(SystemService.is_windows_settings_locked())
+        is_settings_locked = bool(self._auth.get_config("BlockSettings", False)) if self._auth else False
+        self._chk_lock.setChecked(is_settings_locked)
         self._chk_lock.toggled.connect(self._on_settings_lock_toggle)
         c3_lyt.addWidget(self._chk_lock)
         
         self._chk_inst = QCheckBox("Blokir Installer (MSI & EXE)")
+        is_inst_blocked = bool(self._auth.get_config("BlockInstaller", False)) if self._auth else False
+        self._chk_inst.setChecked(is_inst_blocked)
         self._chk_inst.toggled.connect(self._on_installer_lock_toggle)
         c3_lyt.addWidget(self._chk_inst)
 
@@ -1853,9 +1583,13 @@ class AdminDashboard(QMainWindow):
     def _on_settings_lock_toggle(self, checked):
         from app.system_service import SystemService
         success = SystemService.toggle_windows_settings(checked)
+        # Kunci/buka saklar Microphone Privacy di Windows Settings (HKLM) real-time
+        SystemService.toggle_microphone_privacy_lock(checked)
         if success:
             if self._auth: self._auth._config["BlockSettings"] = checked; self._auth._save_config()
-            QMessageBox.information(self, "OK", f"Settings: {'TERKUNCI' if checked else 'TERBUKA'}")
+            if getattr(self, '_installer_guard', None):
+                self._installer_guard.reload(block_settings=checked)
+            QMessageBox.information(self, "OK", f"Settings & Mic Privacy: {'TERKUNCI' if checked else 'TERBUKA'}")
         else:
             QMessageBox.critical(self, "Error", "Gagal. Jalankan sebagai Administrator.")
             self._chk_lock.blockSignals(True)
@@ -1867,9 +1601,8 @@ class AdminDashboard(QMainWindow):
         success = SystemService.toggle_installer_block(checked)
         if success:
             if self._auth: self._auth._config["BlockInstaller"] = checked; self._auth._save_config()
-            if self._installer_guard:
-                if checked: self._installer_guard.enable()
-                else: self._installer_guard.disable()
+            if getattr(self, '_installer_guard', None):
+                self._installer_guard.reload(block_installer=checked)
             QMessageBox.information(self, "OK", f"Instalasi: {'DIBLOKIR' if checked else 'DIIZINKAN'}")
         else:
             QMessageBox.critical(self, "Error", "Gagal. Jalankan sebagai Administrator.")

@@ -59,8 +59,8 @@ class NetworkClient(QObject):
     """
     
     # Signals untuk thread-safe dispatch:
-    remote_lock_signal = Signal(int, str)
-    remote_warning_signal = Signal(str)
+    remote_lock_signal = Signal(int, str, str)
+    remote_warning_signal = Signal(str, str)
     remote_reset_level_signal = Signal()
     remote_update_signal = Signal()
     update_config_signal = Signal(dict)
@@ -68,6 +68,7 @@ class NetworkClient(QObject):
     apply_wordlist_signal = Signal(dict)
     apply_guard_config_signal = Signal(dict)
     remote_wol_signal = Signal(str)
+    apply_ai_model_signal = Signal(str)
 
     def __init__(
         self,
@@ -102,6 +103,7 @@ class NetworkClient(QObject):
         self.apply_wordlist_signal.connect(self._execute_apply_wordlist)
         self.apply_guard_config_signal.connect(self._execute_apply_guard_config)
         self.remote_wol_signal.connect(self._execute_remote_wol)
+        self.apply_ai_model_signal.connect(self._execute_apply_ai_model)
 
         # ── State ──
         self._running = False
@@ -139,6 +141,11 @@ class NetworkClient(QObject):
     def stop(self):
         """Gracefully stop the client."""
         self._running = False
+        if self._writer:
+            try:
+                self._writer.close()
+            except Exception:
+                pass
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
         logger.info("NetworkClient stopped.")
@@ -212,6 +219,7 @@ class NetworkClient(QObject):
         Outer reconnect loop.
         Tries to connect, runs session, then waits before retrying.
         """
+        current_delay = 1
         while self._running:
             try:
                 logger.info(
@@ -224,6 +232,7 @@ class NetworkClient(QObject):
                 )
                 self._writer = writer
                 self._connected = True
+                current_delay = 1
                 logger.info("✓ Connected to server!")
 
                 # Run the session (heartbeat + listener + reporter)
@@ -232,23 +241,24 @@ class NetworkClient(QObject):
             except asyncio.TimeoutError:
                 logger.warning(
                     "Connection timeout to %s:%d — retrying in %ds",
-                    self.server_ip, self.server_port, RECONNECT_DELAY
+                    self.server_ip, self.server_port, current_delay
                 )
             except ConnectionRefusedError:
                 logger.warning(
                     "Server %s:%d refused connection — retrying in %ds",
-                    self.server_ip, self.server_port, RECONNECT_DELAY
+                    self.server_ip, self.server_port, current_delay
                 )
             except OSError as e:
-                logger.warning("Network error: %s — retrying in %ds", e, RECONNECT_DELAY)
+                logger.warning("Network error: %s — retrying in %ds", e, current_delay)
             except Exception as e:
-                logger.error("Unexpected error: %s — retrying in %ds", e, RECONNECT_DELAY)
+                logger.error("Unexpected error: %s — retrying in %ds", e, current_delay)
             finally:
                 self._connected = False
                 self._writer = None
 
             if self._running:
-                await asyncio.sleep(RECONNECT_DELAY)
+                await asyncio.sleep(current_delay)
+                current_delay = min(current_delay * 2, 30)
 
     def _get_mac_address(self) -> str:
         """
@@ -425,13 +435,15 @@ class NetworkClient(QObject):
             elif ptype == "REMOTE_LOCK":
                 duration = packet.get("duration", 60)
                 message = packet.get("message", "")
+                trigger = packet.get("trigger", "[REMOTE]")
                 logger.warning("⚡ REMOTE_LOCK received (duration=%ds)", duration)
-                self._dispatch_remote_lock(duration, message)
+                self._dispatch_remote_lock(duration, message, trigger)
 
             elif ptype == "REMOTE_WARNING":
                 message = packet.get("message", "⚠️ Peringatan dari Admin.")
+                trigger = packet.get("trigger", "[REMOTE]")
                 logger.warning("⚡ REMOTE_WARNING received")
-                self._dispatch_remote_warning(message)
+                self._dispatch_remote_warning(message, trigger)
 
             elif ptype == "REMOTE_UPDATE":
                 logger.info("⚡ REMOTE_UPDATE command received")
@@ -455,6 +467,11 @@ class NetworkClient(QObject):
                 guard_config = packet.get("guard_config", {})
                 logger.info("🛡️ %s received", ptype)
                 self._apply_guard_config_sync(guard_config)
+
+            elif ptype == "SYNC_AI_MODEL":
+                model_b64 = packet.get("model_base64", "")
+                logger.info("🧠 SYNC_AI_MODEL received")
+                self.apply_ai_model_signal.emit(model_b64)
 
             elif ptype == "UPDATE_CONFIG":
                 new_config = packet.get("config", {})
@@ -568,14 +585,14 @@ class NetworkClient(QObject):
 
     # ── Remote Command Dispatcher ─────────────────────────────
 
-    def _dispatch_remote_lock(self, duration: int, message: str = ""):
+    def _dispatch_remote_lock(self, duration: int, message: str = "", trigger: str = "[REMOTE]"):
         """Emit REMOTE_LOCK signal."""
         if not self._penalty_mgr or not self._root:
             logger.warning("No penalty_mgr — ignoring REMOTE_LOCK")
             return
-        self.remote_lock_signal.emit(duration, message)
+        self.remote_lock_signal.emit(duration, message, trigger)
 
-    def _execute_remote_lock(self, duration: int, message: str = ""):
+    def _execute_remote_lock(self, duration: int, message: str = "", trigger: str = "[REMOTE]"):
         try:
             lock_msg = message if message else f"🔒 Sanksi dikirim oleh Admin GC Net.\nDurasi: {duration} detik."
             # Force execute a lockdown-style sanction
@@ -585,20 +602,38 @@ class NetworkClient(QObject):
                 level=0,
                 message=lock_msg,
                 duration=duration,
-                matched_words=["[REMOTE]"]
+                matched_words=[trigger]
             )
             self._penalty_mgr._is_penalty_active = True
         except Exception as e:
             logger.error("REMOTE_LOCK dispatch error: %s", e)
 
-    def _dispatch_remote_warning(self, message: str):
+
+    def _execute_apply_ai_model(self, model_b64: str):
+        try:
+            import base64
+            import os
+            # Save to root dir of the app
+            model_path = os.path.join(os.getcwd(), "nlp_model.pkl")
+            model_bytes = base64.b64decode(model_b64)
+            with open(model_path, 'wb') as f:
+                f.write(model_bytes)
+            logger.info("✅ Model AI berhasil disimpan ke %s", model_path)
+            
+            # Hot reload detector
+            if self._detector and hasattr(self._detector, "reload_ai_model"):
+                self._detector.reload_ai_model(model_path)
+        except Exception as e:
+            logger.error("Gagal menyimpan model AI: %s", e)
+
+    def _dispatch_remote_warning(self, message: str, trigger: str = "[REMOTE]"):
         """Emit REMOTE_WARNING signal."""
         if not self._penalty_mgr or not self._root:
             logger.warning("No penalty_mgr — ignoring REMOTE_WARNING")
             return
-        self.remote_warning_signal.emit(message)
+        self.remote_warning_signal.emit(message, trigger)
 
-    def _execute_remote_warning(self, message: str):
+    def _execute_remote_warning(self, message: str, trigger: str = "[REMOTE]"):
         try:
             # Bypass current violation level logic and show pure warning
             self._penalty_mgr._is_penalty_active = False
@@ -606,7 +641,7 @@ class NetworkClient(QObject):
                 level=0,
                 message=f"Pesan dari Admin:\n\n{message}",
                 warning_delay=10,
-                matched_words=["[REMOTE]"]
+                matched_words=[trigger]
             )
             self._penalty_mgr._is_penalty_active = True
         except Exception as e:

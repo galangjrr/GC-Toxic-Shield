@@ -198,6 +198,9 @@ class PenaltyManager(QObject):
             self._last_violation_time = time.time()
             level_index = self._current_level
             self._current_level += 1
+            
+            # ── Restart auto-reset timer ──
+            self._restart_penalty_timer()
 
         # ── Get sanction recipe ──
         sanction = self._get_sanction(level_index)
@@ -208,9 +211,6 @@ class PenaltyManager(QObject):
 
         # ── Mark penalty as active ──
         self._is_penalty_active = True
-
-        # ── Restart auto-reset timer ──
-        self._restart_penalty_timer()
 
         # ── Log ──
         logger.warning(

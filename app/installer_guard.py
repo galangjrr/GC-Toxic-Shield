@@ -28,7 +28,7 @@ class InstallerGuard:
       5. Settings/Control Panel process blocking (systemsettings.exe, control.exe)
     """
 
-    def __init__(self, root, network_client=None):
+    def __init__(self, root=None, network_client=None):
         self._root = root
         self._network_client = network_client
         self._is_enabled = False
@@ -36,6 +36,8 @@ class InstallerGuard:
         self._last_trigger = 0.0
         self._threads = []
         self._watchdog_observer = None
+        self._currently_blocking = set()
+        self._block_lock = threading.Lock()
 
         # ── Block mode flags ──
         self._block_installer = False
@@ -51,12 +53,14 @@ class InstallerGuard:
             'tiktok-live-studio', 'tiktok',
         ]
         # Combined blacklist for backward compat with load_config()
-        self.blacklist = self.generic_keywords + self.specific_keywords
+        self._base_blacklist = self.generic_keywords + self.specific_keywords
+        self.blacklist = list(self._base_blacklist)
 
         # ── Settings/Control Panel processes to block ──
         self.settings_processes = {
             'systemsettings.exe',  # Windows Settings app
             'control.exe',         # Control Panel
+            'mmc.exe',             # Microsoft Management Console
         }
 
         # ── Browser whitelist (eliminate false positives) ──
@@ -70,35 +74,54 @@ class InstallerGuard:
         self.safe_install_paths = [
             r'c:\program files\\',
             r'c:\program files (x86)\\',
+            r'c:\windows\\',
+            r'c:\programdata\\',
         ]
 
         user_profile = os.environ.get('USERPROFILE', r'C:\Users\Default').lower()
 
         # Path whitelist — processes from these dirs are always allowed
-        self.whitelist_paths = [
+        self._base_whitelist_paths = [
             r"c:\windows\\",
+            r"c:\programdata\\",
             r"c:\gc net\\",
             r"c:\program files\cyberindo\\",
             r"c:\program files (x86)\roblox\\",
-            os.path.join(user_profile, 'appdata', 'local', 'roblox').lower() + '\\',
+            r"c:\program files (x86)\steam\\",
+            r"c:\program files\epic games\\",
+            r"c:\riot games\\",
+            r"c:\program files\ea games\\",
+            r"c:\xboxgames\\",
         ]
+        self.whitelist_paths = list(self._base_whitelist_paths)
+        
+        # Publisher whitelist — PE metadata must contain one of these
+        self.trusted_publishers = {
+            'roblox corporation',
+            'valve corporation',
+            'epic games',
+            'riot games',
+            'zepetto',
+            'garena',
+        }
         
         # Process name whitelist — these EXE names are always allowed
-        self.whitelist_processes = {
+        self._base_whitelist_processes = {
             'robloxplayerlauncher.exe',
+            'robloxplayerinstaller.exe',
+            'robloxstudiolauncherbeta.exe',
             'robloxcrashhandler.exe',
             'pointblank.exe',
             'pblauncher.exe',
             'garena.exe',
             'garenamessenger.exe',
             'lc.exe',
+            'antigravity.exe',
+            'code.exe',
+            'cursor.exe',
+            'devenv.exe',
         }
-        
-        self.danger_zones = [
-            os.path.join(user_profile, 'downloads'),
-            os.path.join(user_profile, 'desktop'),
-            os.path.join(user_profile, 'appdata', 'local', 'temp')
-        ]
+        self.whitelist_processes = set(self._base_whitelist_processes)
         
         self.load_config()
 
@@ -106,6 +129,12 @@ class InstallerGuard:
         """Muat konfigurasi whitelist/blacklist dari file."""
         import os, json
         from app._paths import GUARD_CONFIG_PATH
+        
+        # 1. Reset to base/hardcoded arrays safely first
+        self.whitelist_paths = list(self._base_whitelist_paths)
+        self.whitelist_processes = set(self._base_whitelist_processes)
+        self.blacklist = list(self._base_blacklist)
+        
         if not os.path.exists(GUARD_CONFIG_PATH):
             return
             
@@ -113,15 +142,23 @@ class InstallerGuard:
             with open(GUARD_CONFIG_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 
+            # 2. Safely merge custom items from disk
             if "whitelist_paths" in data:
-                self.whitelist_paths = [str(p).lower() for p in data["whitelist_paths"]]
+                for p in data["whitelist_paths"]:
+                    val = str(p).lower()
+                    if val not in self.whitelist_paths:
+                        self.whitelist_paths.append(val)
             if "whitelist_processes" in data:
-                self.whitelist_processes = {str(p).lower() for p in data["whitelist_processes"]}
+                for p in data["whitelist_processes"]:
+                    self.whitelist_processes.add(str(p).lower())
             if "blacklist" in data:
-                self.blacklist = [str(kw).lower() for kw in data["blacklist"]]
+                for kw in data["blacklist"]:
+                    val = str(kw).lower()
+                    if val not in self.blacklist:
+                        self.blacklist.append(val)
                 
-            logger.info("Loaded custom installer guard configuration (Paths: %d, Procs: %d)", 
-                        len(self.whitelist_paths), len(self.whitelist_processes))
+            logger.info("Loaded custom installer guard configuration (Paths: %d, Procs: %d, Blk: %d)", 
+                        len(self.whitelist_paths), len(self.whitelist_processes), len(self.blacklist))
         except Exception as e:
             logger.error("Failed to load installer guard configuration: %s", e)
 
@@ -134,6 +171,22 @@ class InstallerGuard:
     def set_block_settings(self, enabled: bool):
         """Set whether Settings/Control Panel blocking is active."""
         self._block_settings = enabled
+        if enabled:
+            self._kill_running_settings_processes()
+
+    def _kill_running_settings_processes(self):
+        """Mencari dan mematikan semua instance systemsettings.exe / control.exe yang sedang aktif seketika."""
+        try:
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    pname = str(proc.info['name']).lower()
+                    if pname in self.settings_processes:
+                        pid = proc.info['pid']
+                        self._execute_settings_kill(pid, pname, "SETTINGS_BLOCK_INSTANT")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            logger.debug("Error scanning running settings processes: %s", e)
 
     def reload(self, block_installer=None, block_settings=None):
         """
@@ -144,6 +197,8 @@ class InstallerGuard:
             self._block_installer = bool(block_installer)
         if block_settings is not None:
             self._block_settings = bool(block_settings)
+            if self._block_settings:
+                self._kill_running_settings_processes()
 
         self.load_config()
 
@@ -164,6 +219,11 @@ class InstallerGuard:
         if self._is_enabled:
             return
         
+        # Bypass enabling if root dashboard is in maintenance mode
+        if getattr(self._root, "is_maintenance_mode", False):
+            logger.info("Maintenance Mode is active. InstallerGuard enable bypassed.")
+            return
+
         logger.info("Enabling Triangulation Installer Guard...")
         self._stop_event.clear()
         
@@ -200,6 +260,8 @@ class InstallerGuard:
         
         self._is_enabled = False
 
+
+
     # =========================================================================
     # LAYER 1 & 4: WMI Process & PE Metadata (Publisher Check) + Path Rule
     # =========================================================================
@@ -224,7 +286,7 @@ class InstallerGuard:
                         # Settings/Control Panel process blocking (top-level)
                         if self._block_settings and p_name in self.settings_processes:
                             pid = int(new_process.ProcessId)
-                            self._execute_kill(pid, p_name, "N/A", p_name, "SETTINGS_BLOCK")
+                            self._execute_settings_kill(pid, p_name, "SETTINGS_BLOCK")
                             continue
 
                         # Normal installer blacklist check
@@ -242,6 +304,7 @@ class InstallerGuard:
     def _get_pe_metadata(self, exe_path: str) -> str:
         """Mengambil string metadata lengkap termasuk CompanyName / Publisher."""
         meta_str = ""
+        pe = None
         try:
             pe = pefile.PE(exe_path, fast_load=True)
             pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_RESOURCE']])
@@ -267,9 +330,72 @@ class InstallerGuard:
                                         pass
         except Exception:
             pass
+        finally:
+            if pe and hasattr(pe, 'close'):
+                pe.close()
         return meta_str.lower()
+    def _analyze_installer_heuristics(self, exe_path: str, p_name: str) -> tuple[int, str]:
+        """Menghitung Heuristic Threat Score (0-100) berdasarkan indikator file PE."""
+        score = 0
+        reasons = []
+        
+        metadata_corpus = (p_name + " " + self._get_pe_metadata(exe_path)).lower()
+        
+        # 1. Cek Trusted Publishers (Otomatis Lolos)
+        if any(pub in metadata_corpus for pub in self.trusted_publishers):
+            return 0, "Trusted Publisher"
+            
+        # 2. NLP Metadata Analysis
+        keyword_weights = {
+            'setup': 40,
+            'install': 40,
+            'wizard': 20,
+            'extractor': 30,
+            'downloader': 30,
+            'unpack': 20
+        }
+        for kw, weight in keyword_weights.items():
+            if kw in metadata_corpus:
+                score += weight
+                reasons.append(f"Keyword '{kw}' (+{weight})")
+                
+        # 3. Pengecekan Manifest (Admin Privilege) & Resource Ratio
+        try:
+            pe = pefile.PE(exe_path, fast_load=True)
+            rsrc_size = 0
+            text_size = 0
+            for section in pe.sections:
+                s_name = section.Name.decode('utf-8', 'ignore').strip('\x00')
+                if s_name == '.rsrc': rsrc_size = section.SizeOfRawData
+                elif s_name == '.text': text_size = section.SizeOfRawData
+                
+            if rsrc_size > 0 and text_size > 0:
+                if rsrc_size > text_size * 2:
+                    score += 20
+                    reasons.append("High Resource Ratio (+20)")
+
+            pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_RESOURCE']])
+            if hasattr(pe, 'DIRECTORY_ENTRY_RESOURCE'):
+                for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries:
+                    if entry.id == 24: # RT_MANIFEST
+                        for res_id in entry.directory.entries:
+                            for res_lang in res_id.directory.entries:
+                                data_rva = res_lang.data.struct.OffsetToData
+                                size = res_lang.data.struct.Size
+                                data = pe.get_memory_mapped_image()[data_rva:data_rva+size]
+                                manifest = data.decode('utf-8', 'ignore').lower()
+                                if 'requireadministrator' in manifest or 'highestavailable' in manifest:
+                                    score += 35
+                                    reasons.append("Admin Privilege Request (+35)")
+                                    break
+        except Exception:
+            pass
+            
+        return score, " | ".join(reasons)
 
     def _analyze_and_kill(self, process_event):
+        p = None
+        is_suspended = False
         try:
             pid = int(process_event.ProcessId)
             p_name = str(process_event.ProcessName).lower()
@@ -287,46 +413,55 @@ class InstallerGuard:
             for wp in self.whitelist_paths:
                 if exe_path.startswith(wp):
                     return
-                    
-            # --- 2. Triangulasi Metadata & Publisher ---
-            metadata_corpus = p_name + self._get_pe_metadata(exe_path)
             
-            # --- 3. Path-based Heuristic Modifier ---
-            # Jika dijalankan dari Downloads/Desktop, pemeriksaannya lebih agresif (langsung tembak jika metadata cocok)
-            is_danger_zone = any(exe_path.startswith(dz) for dz in self.danger_zones)
-
-            # --- Smart Triangulation Algorithm ---
-            # 1. Check specific keywords first — BLOCK immediately anywhere
-            specific_match = None
-            for kw in self.specific_keywords:
-                if kw in metadata_corpus:
-                    specific_match = kw
-                    break
-
-            if specific_match:
-                self._execute_kill(pid, p_name, exe_path, specific_match, "WMI_PE_SPECIFIC")
+            # --- SUSPEND SUSPICIOUS PROCESS IMMEDIATELY ---
+            # Suspend right away to prevent its UI from rendering before PE/Path analysis
+            p.suspend()
+            is_suspended = True
+            logger.debug("Temporarily suspended potential installer %s (PID %d) for analysis", p_name, pid)
+                    
+            # --- 2. Triangulasi Heuristic AI ---
+            score, reason = self._analyze_installer_heuristics(exe_path, p_name)
+            
+            if score == 0 and "Trusted Publisher" in reason:
+                logger.info("✅ Trusted publisher detected in %s. Allowing execution.", p_name)
+                if is_suspended:
+                    try: p.resume()
+                    except Exception: pass
+                return
+                
+            if score >= 75:
+                # Target terblokir oleh Heuristic Score
+                trigger_msg = f"Skor Heuristic {score} ({reason})"
+                self._execute_kill(pid, p_name, exe_path, trigger_msg, "HEURISTIC_ENGINE", already_suspended=True)
                 return
 
-            # 2. Check generic keywords — BLOCK only if in danger zone or NOT in safe path
-            generic_match = None
-            for kw in self.generic_keywords:
+            # --- Cek Blacklist Spesifik (Fallback) ---
+            matched_keyword = None
+            for kw in self.specific_keywords:
+                metadata_corpus = (p_name + self._get_pe_metadata(exe_path)).lower()
                 if kw in metadata_corpus:
-                    generic_match = kw
+                    matched_keyword = kw
                     break
 
-            if generic_match:
-                # If exe is in a safe install path and only generic keywords matched, skip
-                is_safe_path = any(exe_path.startswith(sp) for sp in self.safe_install_paths)
-                if is_safe_path:
-                    return  # Trusted location, generic keyword — skip
+            if matched_keyword:
+                self._execute_kill(pid, p_name, exe_path, matched_keyword, "WMI_SPECIFIC_BLACKLIST", already_suspended=True)
+                return
 
-                # Block if in danger zone OR not in safe path
-                self._execute_kill(pid, p_name, exe_path, generic_match, "WMI_PE_METADATA")
+            # If we reach here, it is NOT blocked! Resume it immediately.
+            if is_suspended:
+                p.resume()
 
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Error in _analyze_and_kill: %s", e)
+            # Safe fallback: if we suspended it and something errored out, resume it
+            if p and is_suspended:
+                try:
+                    p.resume()
+                except Exception:
+                    pass
 
     # =========================================================================
     # LAYER 2: Window Title Monitoring (UI Sensor)
@@ -342,36 +477,82 @@ class InstallerGuard:
                         _, pid = win32process.GetWindowThreadProcessId(hwnd)
                         owner_process = self._get_process_name_safe(pid).lower()
 
+                        if owner_process in self.whitelist_processes:
+                            time.sleep(1.5)
+                            continue
+
                         # Skip browser windows entirely (prevent false positives)
                         if owner_process in self.browser_processes:
                             time.sleep(1.5)
                             continue
 
+                        # Check if process path is whitelisted
+                        try:
+                            exe_path = psutil.Process(pid).exe().lower()
+                            if any(exe_path.startswith(wp) for wp in self.whitelist_paths):
+                                time.sleep(1.5)
+                                continue
+                        except Exception:
+                            pass
+
                         # Settings/Control Panel window blocking
                         if self._block_settings:
-                            if owner_process in self.settings_processes:
-                                if any(kw in title for kw in ['settings', 'control panel', 'pengaturan']):
-                                    if pid > 0:
-                                        self._execute_kill(pid, owner_process, "N/A", "settings_window", "WINDOW_SETTINGS_BLOCK")
-                                        time.sleep(1.5)
-                                        continue
+                            is_settings_process = owner_process in self.settings_processes
+                            is_host_process = owner_process in ['explorer.exe', 'applicationframehost.exe']
+                            
+                            if is_settings_process or is_host_process:
+                                if any(kw in title for kw in ['settings', 'control panel', 'pengaturan', 'all control panel items']):
+                                    if is_host_process:
+                                        import win32con
+                                        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                                        logger.warning("🚨 [INSTALLER GUARD] Closed '%s' window gracefully (owned by %s)", title, owner_process)
+                                    else:
+                                        if pid > 0:
+                                            self._execute_settings_kill(pid, owner_process, "WINDOW_SETTINGS_BLOCK")
+                                    time.sleep(1.5)
+                                    continue
 
-                        # Installer window title blocking
+                        # Installer window title blocking & Deep Window UI Scanning
                         if self._block_installer:
-                            for kw in self.blacklist:
-                                # Hanya tembak title bar yang mengandung kata-kata spesifik instalasi/target
-                                # Tingkatkan akurasi: abaikan kata umum jika terdeteksi di launcher game yang sah
+                            child_texts = []
+                            def enum_child_callback(chwnd, ctx):
+                                try:
+                                    if win32gui.IsWindowVisible(chwnd):
+                                        txt = win32gui.GetWindowText(chwnd).strip().lower()
+                                        if txt: ctx.append(txt)
+                                except: pass
+                                return True
+                                
+                            try:
+                                win32gui.EnumChildWindows(hwnd, enum_child_callback, child_texts)
+                            except: pass
+                            
+                            # Cek Judul (Title Bar) menggunakan specific blacklist
+                            title_blocked = False
+                            for kw in self.specific_keywords:
                                 if kw in title:
-                                    if kw in ['live', 'studio', 'streamer', 'assistant']:
-                                        continue
-                                    
-                                    # Deteksi apakah ini jendela launcher game yang sah (false positive mitigation)
-                                    safe_keywords = ['roblox', 'point blank', 'garena', 'pointblank']
-                                    if any(sk in title for sk in safe_keywords) and kw == 'installer':
-                                        continue
-                                        
                                     if pid > 0:
                                         self._execute_kill(pid, owner_process, "N/A", kw, "WINDOW_TITLE_SENSOR")
+                                    title_blocked = True
+                                    break
+                                    
+                            if title_blocked:
+                                continue
+                                
+                            # Cek Teks dalam tombol/jendela (Deep UI Scan) menggunakan generic keywords
+                            installer_buttons = ['next >', 'i agree', 'install', 'setup', 'extract']
+                            # Kalau ada lebih dari 2 kata tombol installer ditemukan dalam satu layar
+                            found_buttons = sum(1 for b in installer_buttons if any(b == txt or b in txt for txt in child_texts))
+                            
+                            if found_buttons >= 2 or any(kw in title for kw in self.generic_keywords):
+                                # Pastikan bukan aplikasi legal (game launcher mitigation)
+                                safe_keywords = ['roblox', 'point blank', 'garena', 'pointblank', 'live', 'studio']
+                                if not any(sk in title for sk in safe_keywords):
+                                    trigger = "DeepUI: " + " | ".join([b for b in installer_buttons if any(b in txt for txt in child_texts)])
+                                    if not trigger.strip("DeepUI: | "): 
+                                        trigger = "Title Keyword"
+                                    if pid > 0:
+                                        self._execute_kill(pid, owner_process, "N/A", trigger, "DEEP_WINDOW_SCANNER")
                                     break
             except Exception:
                 pass
@@ -420,6 +601,10 @@ class InstallerGuard:
                     continue
                     
                 metadata = name + self._get_pe_metadata(exe)
+                
+                if any(pub in metadata for pub in self.trusted_publishers):
+                    continue
+
                 for kw in self.blacklist:
                     if kw in metadata:
                         self._execute_kill(p.info['pid'], name, exe, kw, trigger_source)
@@ -430,16 +615,39 @@ class InstallerGuard:
     # =========================================================================
     # ACTION: Kill & Report
     # =========================================================================
-    def _execute_kill(self, pid: int, process_name: str, path: str, keyword: str, source: str):
+    def _execute_kill(self, pid: int, process_name: str, path: str, keyword: str, source: str, already_suspended: bool = False):
         """Eksekusi pemblokiran tunggal."""
+        with self._block_lock:
+            if pid in self._currently_blocking:
+                logger.info("Process %d is already in block list, skipping duplicate prompt.", pid)
+                return
+            self._currently_blocking.add(pid)
+
         try:
             target = psutil.Process(pid)
-            target.terminate()
             
-            logger.warning(
-                "🚨 [INSTALLER GUARD] (%s) Blocked %s (Trigger Keyword: '%s')", 
-                source, process_name, keyword
-            )
+            # SUSPEND & OVERRIDE LOGIC
+            if not already_suspended:
+                target.suspend()
+                logger.warning("🚨 [INSTALLER GUARD] (%s) SUSPENDED %s (Trigger Keyword: '%s')", source, process_name, keyword)
+            else:
+                logger.warning("🚨 [INSTALLER GUARD] (%s) Already suspended %s (Trigger Keyword: '%s')", source, process_name, keyword)
+            
+            allow = False
+            if hasattr(self, 'on_blocked_callback') and callable(self.on_blocked_callback):
+                # This call blocks the thread until the main thread dialog is closed
+                allow = self.on_blocked_callback(process_name, keyword, source)
+                
+            if allow:
+                logger.info("✅ [INSTALLER GUARD] Admin override granted. Resuming %s", process_name)
+                target.resume()
+                self.whitelist_processes.add(process_name.lower())
+                return
+            else:
+                logger.warning("🚫 [INSTALLER GUARD] Override denied. Terminating %s", process_name)
+                try: target.resume() 
+                except: pass
+                target.kill()
             
             if self._network_client:
                 # Modifikasi packet di center report
@@ -452,6 +660,34 @@ class InstallerGuard:
                 self._trigger_warning()
         except Exception:
             pass
+        finally:
+            with self._block_lock:
+                self._currently_blocking.discard(pid)
+
+    def _execute_settings_kill(self, pid: int, process_name: str, source: str):
+        """Eksekusi pemblokiran khusus untuk System Settings & Control Panel (tanpa prompt password)."""
+        with self._block_lock:
+            if pid in self._currently_blocking:
+                return
+            self._currently_blocking.add(pid)
+
+        try:
+            target = psutil.Process(pid)
+            logger.warning("🚫 [SETTINGS GUARD] (%s) Terminating Settings/Control Panel: %s", source, process_name)
+            target.terminate()
+            
+            if self._network_client:
+                self._report_blocked(process_name, f"[{source}] {process_name} (Settings Block)")
+                
+            now = time.time()
+            if now - self._last_trigger > 3.0:
+                self._last_trigger = now
+                self._trigger_settings_warning()
+        except Exception:
+            pass
+        finally:
+            with self._block_lock:
+                self._currently_blocking.discard(pid)
 
     def _report_blocked(self, filename: str, trigger: str):
         if hasattr(self._network_client, "report_blocked_installer"):
@@ -471,7 +707,18 @@ class InstallerGuard:
         from app.overlay import SimpleWarningBox
         if getattr(SimpleWarningBox, "_instance", None) is None:
             msg = "Instalasi mandiri dilarang demi stabilitas komputer. Silahkan hubungi admin jika ingin menginstall aplikasi tertentu"
-            SimpleWarningBox(self._root, custom_text=msg)
+            SimpleWarningBox(custom_text=msg, parent=self._root)
+
+    def _trigger_settings_warning(self):
+        if self._root:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self._root, self._show_settings_warning)
+
+    def _show_settings_warning(self):
+        from app.overlay import SimpleWarningBox
+        if getattr(SimpleWarningBox, "_instance", None) is None:
+            msg = "Akses ke Control Panel / System Settings diblokir oleh Administrator. Silakan gunakan Mode Maintenance jika ingin mengaksesnya."
+            SimpleWarningBox(custom_text=msg, parent=self._root)
 
     def cleanup(self):
         self.disable()
