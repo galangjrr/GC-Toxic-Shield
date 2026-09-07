@@ -361,6 +361,24 @@ def main():
             dashboard._network_client = network_client
             logger.info("✓ NetworkClient started → %s:%d", server_ip, server_port)
 
+        # ── Background Auto-Updater (Silent, Non-Intrusive) ──
+        def _check_github_update_background():
+            try:
+                from app.updater import GithubUpdater
+                updater = GithubUpdater(GITHUB_REPO, APP_VERSION)
+                has_update, lat_ver, dl_url, _ = updater.check_for_updates()
+                if has_update and dl_url:
+                    logger.info("Auto-update found: %s. Installing silently in background...", lat_ver)
+                    updater.download_and_install_async(dl_url)
+            except Exception as e:
+                logger.debug("Silent background update check error: %s", e)
+
+        # Trigger update check 15s after boot, repeat every 4 hours
+        QTimer.singleShot(15000, lambda: threading.Thread(target=_check_github_update_background, daemon=True).start())
+        auto_update_timer = QTimer(root)
+        auto_update_timer.timeout.connect(lambda: threading.Thread(target=_check_github_update_background, daemon=True).start())
+        auto_update_timer.start(4 * 3600 * 1000)
+
         # ── Installer Guard Override Handler ──
         from PySide6.QtCore import QObject, Signal
         class BlockSignalHandler(QObject):

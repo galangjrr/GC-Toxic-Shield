@@ -20,6 +20,11 @@ import sys
 import subprocess
 import shutil
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 # ── Paths ──
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD_TOOLS = os.path.join(PROJECT_ROOT, "build_tools")
@@ -192,6 +197,12 @@ def build():
                     pass
 
     print(f"  ✓ Cleanup finished ({cleanup_count} files removed)")
+
+    # ── Create Release ZIP for GitHub Auto-Updater ──
+    print("\n  Packaging Release ZIP for GitHub Releases...")
+    zip_output_base = os.path.join(PROJECT_ROOT, "dist", "GC.Toxic.Shield")
+    zip_path = shutil.make_archive(zip_output_base, 'zip', DIST_DIR)
+    print(f"  ✓ Release ZIP ready: {zip_path}")
 
     # ── Summary ──
     print("\n" + "━" * 60)

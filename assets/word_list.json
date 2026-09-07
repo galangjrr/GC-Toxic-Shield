@@ -15,19 +15,11 @@
     "ngewe": [
       "ngewe"
     ],
-    "peler": [
-      "peler"
-    ],
     "itil": [
       "itil"
     ]
   },
-  "phonetic_mapping": {
-    "dealer": "peler",
-    "peeler": "peler",
-    "peller": "peler",
-    "appler": "peler"
-  },
+  "phonetic_mapping": {},
   "context_exclusions": {
     "kontol": [
       "kontrol", "kondo", "kumpul"
@@ -44,9 +36,6 @@
     "ngewe": [
       "dewe", "cewe", "ngawur"
     ],
-    "peler": [
-      "honda", "yamaha", "kentang", "buah", "motor", "mobil"
-    ],
     "itil": [
       "kutil", "detil", "usil"
     ]
@@ -57,7 +46,6 @@
     "ngantuk", "nuntut", "nyentuh",
     "jemput", "lembut", "rambut",
     "dewe", "cewe", "ngawur",
-    "honda", "yamaha", "kentang", "buah", "motor", "mobil",
     "kutil", "detil", "usil"
   ]
 }
