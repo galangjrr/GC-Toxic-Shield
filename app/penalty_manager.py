@@ -169,10 +169,12 @@ class PenaltyManager(QObject):
         return list(self._sanction_list)
 
     def reset_level(self):
-        """Force reset the violation level back to 0 (Level 1 UI)."""
+        """Force reset the violation level back to 0 (Level 1 UI) and dismiss active lock."""
         with self._lock:
             self._current_level = 0
             self._is_penalty_active = False
+            if self._overlay and hasattr(self._overlay, "dismiss"):
+                self._overlay.dismiss()
         logger.info("Penalty level reset to 0 by remote command.")
 
     # ================================================================
