@@ -478,6 +478,15 @@ class NetworkClient(QObject):
                 logger.info("⚙️ UPDATE_CONFIG received: %r", new_config)
                 self._dispatch_update_config(new_config)
 
+            elif ptype == "AUDIT_WOL":
+                logger.info("🔍 AUDIT_WOL command received from server")
+                audit_res = SystemService.audit_wake_on_lan()
+                await self._send(writer, {
+                    "type": "WOL_AUDIT_REPORT",
+                    "pc_name": self.pc_name,
+                    "audit": audit_res,
+                })
+
             elif ptype == "REMOTE_WOL":
                 target_mac = packet.get("mac_address", "")
                 logger.info("⚡ REMOTE_WOL relay request for %s", target_mac)

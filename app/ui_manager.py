@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QGridLayout, QSlider, QComboBox, QLineEdit,
     QCheckBox, QListWidget, QListWidgetItem, QMessageBox, QButtonGroup,
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QSpinBox, QDoubleSpinBox
+    QSpinBox, QDoubleSpinBox, QDialog
 )
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QIcon, QColor, QTextCursor
@@ -1369,6 +1369,11 @@ class AdminDashboard(QMainWindow):
         self._chk_inst.toggled.connect(self._on_installer_lock_toggle)
         c3_lyt.addWidget(self._chk_inst)
 
+        btn_wol = QPushButton("🔍 Audit Kelayakan WOL")
+        btn_wol.setProperty("class", "ActionBtn BtnOutline")
+        btn_wol.clicked.connect(self._run_wol_audit_dialog)
+        c3_lyt.addWidget(btn_wol)
+
         ver_lyt = QHBoxLayout()
         lbl_ver = QLabel(f"v{self._app_version}")
         lbl_ver.setProperty("class", "Muted")
@@ -1630,6 +1635,168 @@ class AdminDashboard(QMainWindow):
     def _schedule_refresh(self):
         self._refresh_monitor()
 
+    def _run_wol_audit_dialog(self):
+        """Menampilkan dialog audit kelayakan WOL murni read-only."""
+        dialog = WolAuditDialog(self)
+        dialog.exec()
+
     def closeEvent(self, event):
         if self._on_close: self._on_close()
         event.accept()
+
+
+# ================================================================
+# WOL AUDIT DIALOG (100% READ-ONLY)
+# ================================================================
+
+class WolAuditDialog(QDialog):
+    """Dialog hasil audit Wake-on-LAN (WOL) yang 100% aman dan informatif."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Audit Kesiapan Wake-on-LAN (WOL)")
+        self.resize(640, 540)
+        self.setMinimumSize(540, 440)
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: {BG}; color: {TEXT}; font-family: "{FONT_FAM}"; }}
+            QLabel {{ color: {TEXT}; }}
+            QTextEdit {{
+                background-color: {ENTRY_BG};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                color: {TEXT};
+                font-family: "Consolas", monospace;
+                font-size: 12px;
+                line-height: 1.4;
+                padding: 10px;
+            }}
+        """)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # Header Title
+        title = QLabel("🔍 Audit Kesiapan Wake-on-LAN (WOL)")
+        title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {TEXT};")
+        layout.addWidget(title)
+
+        subtitle = QLabel("Pemeriksaan murni read-only: status Fast Startup, Driver NIC, dan fitur daya S5 Windows.")
+        subtitle.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
+        layout.addWidget(subtitle)
+
+        # Status Summary Card
+        self.status_card = QFrame()
+        self.status_card.setStyleSheet(f"background-color: {CARD}; border: 1px solid {BORDER}; border-radius: 8px; padding: 12px;")
+        sc_lyt = QVBoxLayout(self.status_card)
+        self.status_label = QLabel("⏳ Sedang memeriksa sistem...")
+        self.status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {WARNING};")
+        sc_lyt.addWidget(self.status_label)
+        layout.addWidget(self.status_card)
+
+        # Detail Text Area
+        self.detail_text = QTextEdit()
+        self.detail_text.setReadOnly(True)
+        layout.addWidget(self.detail_text, 1)
+
+        # Bottom Actions
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+
+        btn_close = QPushButton("Tutup")
+        btn_close.setProperty("class", "ActionBtn BtnOutline")
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CARD};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                color: {TEXT};
+                padding: 6px 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                border-color: {ACCENT};
+            }}
+        """)
+        btn_close.clicked.connect(self.accept)
+        btn_box.addWidget(btn_close)
+        layout.addLayout(btn_box)
+
+        # Jalankan audit via background thread agar dialog langsung muncul tanpa freeze
+        threading.Thread(target=self._run_audit, daemon=True).start()
+
+    def _run_audit(self):
+        from app.system_service import SystemService
+        data = SystemService.audit_wake_on_lan()
+        QTimer.singleShot(0, lambda: self._display_results(data))
+
+    def _display_results(self, data: dict):
+        eligible = data.get("eligible", False)
+        if eligible:
+            self.status_label.setText("🟢 STATUS: SIAP (ELIGIBLE FOR WOL)")
+            self.status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {SUCCESS};")
+        else:
+            self.status_label.setText("🔴 STATUS: BELUM SIAP (INELIGIBLE)")
+            self.status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {DANGER};")
+
+        lines = []
+        lines.append("=== 1. STATUS FAST STARTUP ===")
+        fs = data.get("fast_startup", {})
+        fs_stat = fs.get("status", "UNKNOWN")
+        icon = "✅ [PASS]" if fs_stat == "PASS" else "❌ [FAIL]"
+        lines.append(f"{icon} {fs.get('detail', '')}\n")
+
+        lines.append("=== 2. NETWORK ADAPTER & DRIVER ===")
+        adapters = data.get("adapters", [])
+        if not adapters:
+            lines.append("⚠️ Tidak ada adapter fisik terdeteksi.\n")
+        else:
+            for nic in adapters:
+                lines.append(f"Adapter     : {nic.get('Name')} - {nic.get('Description')}")
+                prov = nic.get('DriverProvider')
+                p_icon = "⚠️ [WARN Generic]" if "Microsoft" in str(prov) else "✅ [PASS OEM]"
+                lines.append(f"Provider    : {prov} ({p_icon}) | Versi: {nic.get('DriverVersion')}")
+
+                magic = nic.get('WakeOnMagicPacket')
+                m_stat = "Enabled" if magic in (1, 2, "Enabled") else "Disabled"
+                lines.append(f"Magic Packet: {m_stat}")
+
+                allow = nic.get('AllowTurnOff')
+                lines.append(f"Allow TurnOff: {allow}")
+
+                if nic.get('ShutdownWake'):
+                    lines.append(f"Shutdown Wake : {nic.get('ShutdownWake')}")
+                if nic.get('LinkSpeed'):
+                    lines.append(f"Standby Speed : {nic.get('LinkSpeed')}")
+                lines.append("")
+
+        lines.append("=== 3. KERNEL WAKE-ARMED (powercfg) ===")
+        nic_armed = data.get("nic_is_wake_armed", False)
+        armed_icon = "✅ [PASS] Terdaftar" if nic_armed else "❌ [FAIL] Belum Terdaftar"
+        lines.append(f"Status Kernel : {armed_icon}")
+        armed_list = data.get("wake_armed_devices", [])
+        if armed_list:
+            lines.append(f"Perangkat armed: {', '.join(armed_list[:3])}...")
+        lines.append("")
+
+        lines.append("=== 4. STATUS HARDWARE BIOS (ErP / EuP) ===")
+        lines.append("ℹ️ ACPI Windows tidak punya akses langsung membaca switch sirkuit ErP di BIOS.")
+        lines.append("🔎 Indikator Fisik Pasti: Lampu port RJ45 saat PC OFF.")
+        lines.append("   - Lampu port LAN MATI saat PC shutdown  -> ErP AKTIF (Daya +5VSB dipotong) atau FastBoot on.")
+        lines.append("   - Lampu port LAN NYALA saat PC shutdown -> ErP NONAKTIF (Daya siaga siap terima Magic Packet).\n")
+
+        issues = data.get("issues", [])
+        if issues:
+            lines.append("=== 5. MASALAH TERDETEKSI ===")
+            for iss in issues:
+                lines.append(f"• {iss}")
+            lines.append("")
+
+        recs = data.get("recommendations", [])
+        if recs:
+            lines.append("=== 6. REKOMENDASI TINDAKAN AMAN ===")
+            for r in recs:
+                lines.append(f"👉 {r}")
+        else:
+            lines.append("🎉 Semua parameter Windows memenuhi syarat untuk Wake-on-LAN!")
+
+        self.detail_text.setPlainText("\n".join(lines))

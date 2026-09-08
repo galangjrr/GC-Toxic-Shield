@@ -594,3 +594,144 @@ class SystemService:
         except Exception as e:
             logger.error("Failed to set high priority: %s", e)
             return False
+
+    # ================================================================
+    # WAKE ON LAN (WOL) AUDIT & DIAGNOSTIC (100% READ-ONLY)
+    # ================================================================
+
+    @staticmethod
+    def audit_wake_on_lan() -> dict:
+        """
+        Audit kelayakan Wake-on-LAN secara murni READ-ONLY.
+        Tidak melakukan modifikasi file, registry, atau service apapun.
+        """
+        import json
+        import subprocess
+
+        result = {
+            "fast_startup": {"status": "UNKNOWN", "value": None, "detail": ""},
+            "adapters": [],
+            "eligible": False,
+            "issues": [],
+            "recommendations": []
+        }
+
+        # 1. Cek Fast Startup (HiberbootEnabled)
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\Session Manager\Power",
+                0,
+                winreg.KEY_READ
+            )
+            val, _ = winreg.QueryValueEx(key, "HiberbootEnabled")
+            winreg.CloseKey(key)
+            result["fast_startup"]["value"] = val
+            if val == 1:
+                result["fast_startup"]["status"] = "FAIL"
+                result["fast_startup"]["detail"] = "Aktif (Memutus arus siaga LAN saat Windows shutdown)"
+                result["issues"].append("Fast Startup Windows aktif.")
+                result["recommendations"].append("Matikan Fast Startup di Control Panel -> Power Options -> 'Choose what the power buttons do'.")
+            else:
+                result["fast_startup"]["status"] = "PASS"
+                result["fast_startup"]["detail"] = "Nonaktif (S5 power standby aman)"
+        except Exception as e:
+            result["fast_startup"]["status"] = "WARN"
+            result["fast_startup"]["detail"] = f"Tidak dapat dibaca: {e}"
+
+        # 2. Cek Network Adapter & Driver via PowerShell (Read-only)
+        try:
+            ps_code = (
+                "$item = [PSCustomObject]@{"
+                "  Nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object {"
+                "    $n = $_.Name;"
+                "    $pwr = Get-NetAdapterPowerManagement -Name $n -ErrorAction SilentlyContinue;"
+                "    $adv = Get-NetAdapterAdvancedProperty -Name $n -ErrorAction SilentlyContinue;"
+                "    [PSCustomObject]@{"
+                "      Name = $n;"
+                "      Description = $_.InterfaceDescription;"
+                "      DriverProvider = $_.DriverProvider;"
+                "      DriverVersion = $_.DriverVersion;"
+                "      WakeOnMagicPacket = if ($pwr) { [int]$pwr.WakeOnMagicPacket } else { 0 };"
+                "      AllowTurnOff = if ($pwr) { [int]$pwr.AllowComputerToTurnOffDevice } else { 0 };"
+                "      ShutdownWake = ($adv | Where-Object { $_.DisplayName -match 'Shutdown Wake' }).DisplayValue;"
+                "      LinkSpeed = ($adv | Where-Object { $_.DisplayName -match 'Link Speed' }).DisplayValue;"
+                "    }"
+                "  })"
+                "};"
+                "$item | ConvertTo-Json -Depth 3 -Compress"
+            )
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_code],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=10
+            )
+            if proc.stdout and proc.stdout.strip():
+                data = json.loads(proc.stdout.strip())
+                raw_nics = data.get("Nics", [])
+                if isinstance(raw_nics, dict):
+                    raw_nics = [raw_nics]
+                result["adapters"] = raw_nics
+
+                for nic in raw_nics:
+                    name = nic.get("Name", "NIC")
+                    provider = str(nic.get("DriverProvider", ""))
+                    if "Microsoft" in provider:
+                        result["issues"].append(f"Adapter '{name}' memakai driver generic Microsoft ({provider}).")
+                        result["recommendations"].append(f"Ganti driver '{name}' dengan installer resmi Realtek/Intel OEM agar mendukung daya S5.")
+
+                    magic = nic.get("WakeOnMagicPacket")
+                    # CIM: 2 = Enabled, 3 = Disabled, 0/1 depend on schema
+                    if magic not in (1, 2, "Enabled"):
+                        result["issues"].append(f"Adapter '{name}' Wake-on-Magic-Packet belum diaktifkan.")
+                        result["recommendations"].append(f"Aktifkan 'Wake on Magic Packet' di Device Manager -> Properties '{name}' -> Advanced.")
+
+                    shut = str(nic.get("ShutdownWake", "") or "")
+                    if shut and shut.lower() == "disabled":
+                        result["issues"].append(f"Adapter '{name}' Shutdown Wake-On-Lan status Disabled.")
+                        result["recommendations"].append(f"Ubah 'Shutdown Wake-On-Lan' ke 'Enabled' di Device Manager -> '{name}'.")
+        except Exception as e:
+            logger.warning("WOL audit adapter query error: %s", e)
+            result["issues"].append(f"Gagal memeriksa adapter: {e}")
+
+        # 3. Cek Kernel Wake Armed Devices (powercfg /devicequery wake_armed)
+        try:
+            armed_proc = subprocess.run(
+                ["powercfg", "/devicequery", "wake_armed"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=5
+            )
+            armed_lines = [line.strip() for line in armed_proc.stdout.splitlines() if line.strip()]
+            result["wake_armed_devices"] = armed_lines
+            
+            # Cek apakah ada adapter fisik yang terdaftar di wake_armed
+            nic_armed = False
+            for nic in result["adapters"]:
+                desc = nic.get("Description", "")
+                if any(desc.lower() in a.lower() for a in armed_lines):
+                    nic_armed = True
+                    break
+            result["nic_is_wake_armed"] = nic_armed
+            if not nic_armed:
+                result["issues"].append("NIC fisik belum terdaftar di daftar 'wake_armed' Windows kernel.")
+                result["recommendations"].append("Centang 'Allow this device to wake the computer' di tab Power Management kartu LAN.")
+        except Exception as e:
+            result["wake_armed_devices"] = []
+            result["nic_is_wake_armed"] = False
+
+        # 4. Catatan ErP / EuP (Tingkat Firmware Motherboard)
+        result["erp_bios_note"] = "ErP/EuP adalah saklar sirkuit daya fisik di BIOS. OS tidak punya API langsung untuk membacanya. Indikator mutlak: jika lampu port LAN mati saat PC shutdown, ErP aktif atau FastBoot memutus daya."
+
+        # 5. Overall Verdict
+        result["eligible"] = (
+            result["fast_startup"]["status"] == "PASS" and
+            len(result["issues"]) == 0 and
+            len(result["adapters"]) > 0
+        )
+
+        return result

@@ -400,10 +400,13 @@ class LockdownOverlay:
                     
                 if self._is_active:
                     vk_code = ctypes.cast(lParam, ctypes.POINTER(ctypes.wintypes.DWORD)).contents.value
-                    # Block Alt+Tab
-                    if wParam == WM_SYSKEYDOWN and vk_code == VK_TAB: return 1
+                    # Block ALL Tab variants (Alt+Tab, Win+Tab, Ctrl+Tab, plain Tab)
+                    if vk_code == VK_TAB: return 1
                     # Block Win keys
                     if vk_code in (VK_LWIN, VK_RWIN): return 1
+                    # Block ANY key when Win key is held down (Win+D, Win+Tab, Win+M, etc.)
+                    if (user32.GetAsyncKeyState(VK_LWIN) & 0x8000) or (user32.GetAsyncKeyState(VK_RWIN) & 0x8000):
+                        return 1
                     # Block Ctrl+Esc (Task Manager shortcut)
                     if vk_code == VK_ESCAPE:
                         if user32.GetAsyncKeyState(0x11) & 0x8000: return 1
@@ -535,6 +538,16 @@ class LockdownWindow(QDialog):
         self._focus_timer.start(200)
 
     def _enforce_lockdown_focus(self):
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = int(self.winId())
+            # HWND_TOPMOST = -1, SWP_NOSIZE=0x0001, SWP_NOMOVE=0x0002, SWP_SHOWWINDOW=0x0040
+            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+            user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+
         if not self.isActiveWindow():
             self.raise_()
             self.activateWindow()
