@@ -3,7 +3,7 @@ import os
 import time
 
 # Ensure we can import app modules
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimer

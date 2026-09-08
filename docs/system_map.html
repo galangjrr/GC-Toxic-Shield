@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GC Toxic Shield — System Map &amp; Architecture</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #060911;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+    /* Toolbar Header */
+    header {
+      height: 58px;
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      z-index: 50;
+      flex-shrink: 0;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-icon {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #38bdf8;
+      box-shadow: 0 0 12px #38bdf8;
+    }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #f1f5f9;
+    }
+    .badge-bar {
+      display: flex;
+      gap: 8px;
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+    }
+    .badge.cyan { color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); }
+    .badge.green { color: #34d399; border-color: rgba(52, 211, 153, 0.4); }
+    .badge.red { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover {
+      background: #334155;
+      color: #ffffff;
+      border-color: #64748b;
+    }
+    .btn:active {
+      transform: scale(0.97);
+    }
+
+    /* Viewport Area */
+    #viewport {
+      flex: 1;
+      position: relative;
+      cursor: grab;
+      overflow: hidden;
+      background: radial-gradient(circle at center, #0d1527 0%, #060911 100%);
+    }
+    #viewport:active {
+      cursor: grabbing;
+    }
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+      transition: transform 0.05s linear;
+    }
+    svg {
+      display: block;
+      width: 1600px;
+      height: 1100px;
+    }
+
+    /* Floating Quick Help */
+    .hint {
+      position: absolute;
+      bottom: 16px;
+      right: 20px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid #334155;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 11.5px;
+      color: #94a3b8;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon"></div>
+      <div class="brand-title">GC TOXIC SHIELD — ECOSYSTEM ARCHITECTURE</div>
+      <div class="badge-bar">
+        <span class="badge cyan">TCP Port 9000</span>
+        <span class="badge red">6 Toxic Words</span>
+        <span class="badge green">Proximity -40 dB</span>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn" onclick="zoom(0.15)">➕ Zoom In</button>
+      <button class="btn" onclick="zoom(-0.15)">➖ Zoom Out</button>
+      <button class="btn" onclick="resetView()">🔄 100%</button>
+      <button class="btn" onclick="fitView()">⛶ Fit Screen</button>
+    </div>
+  </header>
+
+  <div id="viewport">
+    <div id="canvas">
+      <!-- Embedded Inline SVG -->
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1100" width="1600" height="1100" style="background: #090d16; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.75" opacity="0.4"/>
+          </pattern>
+          <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#38bdf8"/>
+            <stop offset="50%" stop-color="#818cf8"/>
+            <stop offset="100%" stop-color="#c084fc"/>
+          </linearGradient>
+          <linearGradient id="clientGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#0f172a"/>
+            <stop offset="100%" stop-color="#1e1b4b"/>
+          </linearGradient>
+          <linearGradient id="serverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#0f172a"/>
+            <stop offset="100%" stop-color="#1c1917"/>
+          </linearGradient>
+          <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#1e293b" stop-opacity="0.9"/>
+            <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95"/>
+          </linearGradient>
+          <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.6"/>
+          </filter>
+          <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981"/>
+          </marker>
+          <marker id="arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8"/>
+          </marker>
+          <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#c084fc"/>
+          </marker>
+          <marker id="arrow-red" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#f87171"/>
+          </marker>
+          <marker id="arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#090d16"/>
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+
+        <!-- HEADER -->
+        <g transform="translate(60, 40)">
+          <rect width="1480" height="90" rx="16" fill="#0f172a" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+          <text x="35" y="42" font-size="26" font-weight="800" fill="url(#headerGrad)" letter-spacing="1.5">
+            GC TOXIC SHIELD — ARSITEKTUR &amp; PETA SISTEM LENGKAP
+          </text>
+          <text x="35" y="68" font-size="13" font-weight="500" fill="#94a3b8" letter-spacing="0.5">
+            Peta Relasi Komprehensif: Klien Gaming PC, Mesin AI Deteksi Suara, Protokol Jaringan TCP, dan Pusat Monitoring Admin
+          </text>
+          <g transform="translate(1000, 26)">
+            <rect x="0" y="0" width="135" height="36" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2"/>
+            <circle cx="16" cy="18" r="4" fill="#38bdf8"/>
+            <text x="28" y="22" font-size="11" font-weight="700" fill="#f8fafc">TCP PORT 9000</text>
+
+            <rect x="145" y="0" width="155" height="36" rx="8" fill="#1e293b" stroke="#f87171" stroke-width="1.2"/>
+            <circle cx="161" cy="18" r="4" fill="#f87171"/>
+            <text x="173" y="22" font-size="11" font-weight="700" fill="#f8fafc">6 TOXIC WORDS</text>
+
+            <rect x="310" y="0" width="145" height="36" rx="8" fill="#1e293b" stroke="#34d399" stroke-width="1.2"/>
+            <circle cx="326" cy="18" r="4" fill="#34d399"/>
+            <text x="338" y="22" font-size="11" font-weight="700" fill="#f8fafc">-40 dB PROXIMITY</text>
+          </g>
+        </g>
+
+        <!-- ZONE 1: CLIENT -->
+        <g transform="translate(60, 155)">
+          <rect width="520" height="885" rx="20" fill="url(#clientGrad)" stroke="#38bdf8" stroke-width="2" filter="url(#shadow)"/>
+          <g transform="translate(25, 25)">
+            <rect width="180" height="32" rx="6" fill="#0284c7"/>
+            <text x="15" y="21" font-size="12" font-weight="800" fill="#ffffff" letter-spacing="1">CLIENT PC APPARATUS</text>
+            <text x="195" y="22" font-size="16" font-weight="800" fill="#f8fafc">GC Toxic Shield</text>
+            <text x="330" y="22" font-size="12" font-weight="500" fill="#38bdf8">(Running on Billing PCs)</text>
+          </g>
+
+          <!-- 1.1 Audio -->
+          <g transform="translate(25, 75)">
+            <rect width="470" height="135" rx="12" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+            <rect x="0" y="0" width="470" height="30" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 30 L 470 30 L 470 18 Z" fill="#1e293b"/>
+            <text x="15" y="20" font-size="12" font-weight="700" fill="#38bdf8">1. AUDIO CAPTURE &amp; PROXIMITY GATE (audio_engine.py)</text>
+
+            <g transform="translate(15, 42)">
+              <rect width="135" height="75" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+              <text x="12" y="24" font-size="11" font-weight="700" fill="#f8fafc">Hardware Mic</text>
+              <text x="12" y="42" font-size="9.5" fill="#94a3b8">Fantech HQ53 USB</text>
+              <text x="12" y="58" font-size="9.5" fill="#38bdf8">16kHz Mono Stream</text>
+            </g>
+
+            <path d="M 155 80 L 175 80" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+            <g transform="translate(180, 42)">
+              <rect width="135" height="75" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+              <text x="12" y="24" font-size="11" font-weight="700" fill="#f8fafc">RMS dB Gate</text>
+              <text x="12" y="42" font-size="9.5" fill="#94a3b8">Cutoff: &lt; -40 dB</text>
+              <text x="12" y="58" font-size="9.5" fill="#34d399">Tolak Suara Jauh</text>
+            </g>
+
+            <path d="M 320 80 L 340 80" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+            <g transform="translate(345, 42)">
+              <rect width="110" height="75" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+              <text x="10" y="24" font-size="11" font-weight="700" fill="#f8fafc">VAD Slices</text>
+              <text x="10" y="42" font-size="9.5" fill="#94a3b8">Voice Activity</text>
+              <text x="10" y="58" font-size="9.5" fill="#c084fc">PCM Chunk Buffer</text>
+            </g>
+          </g>
+
+          <path d="M 260 215 L 260 235" stroke="#c084fc" stroke-width="2" marker-end="url(#arrow-purple)"/>
+
+          <!-- 1.2 Detection -->
+          <g transform="translate(25, 240)">
+            <rect width="470" height="175" rx="12" fill="url(#cardGrad)" stroke="#c084fc" stroke-width="1.2"/>
+            <rect x="0" y="0" width="470" height="30" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 30 L 470 30 L 470 18 Z" fill="#1e293b"/>
+            <text x="15" y="20" font-size="12" font-weight="700" fill="#c084fc">2. AI DETECTION &amp; FILTER PIPELINE (detector.py)</text>
+
+            <g transform="translate(15, 42)">
+              <rect width="210" height="65" rx="8" fill="#0f172a" stroke="#c084fc" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">Whisper ASR Speech Engine</text>
+              <text x="12" y="38" font-size="9.5" fill="#94a3b8">Audio chunks -&gt; Teks Mentah</text>
+              <text x="12" y="52" font-size="9.5" fill="#38bdf8">Optimized offline inference</text>
+            </g>
+
+            <g transform="translate(240, 42)">
+              <rect width="215" height="65" rx="8" fill="#0f172a" stroke="#f87171" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">Exact 6-Word Toxic Filter</text>
+              <text x="12" y="38" font-size="9" fill="#f87171">kontol | memek | ngentot</text>
+              <text x="12" y="52" font-size="9" fill="#f87171">ngewe | jembut | itil</text>
+            </g>
+
+            <g transform="translate(15, 118)">
+              <rect width="440" height="44" rx="6" fill="#1e1b4b" stroke="#818cf8" stroke-width="1"/>
+              <text x="12" y="19" font-size="10" font-weight="700" fill="#a5b4fc">Anti-False-Positive Filter:</text>
+              <text x="12" y="34" font-size="9.5" fill="#cbd5e1">Hapus 'peler' &amp; homofon gaming ('player', 'peeler', 'dealer') agar bebas false-alarm</text>
+            </g>
+          </g>
+
+          <path d="M 260 420 L 260 440" stroke="#f87171" stroke-width="2" marker-end="url(#arrow-red)"/>
+
+          <!-- 1.3 Penalty -->
+          <g transform="translate(25, 445)">
+            <rect width="470" height="150" rx="12" fill="url(#cardGrad)" stroke="#f87171" stroke-width="1.2"/>
+            <rect x="0" y="0" width="470" height="30" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 30 L 470 30 L 470 18 Z" fill="#1e293b"/>
+            <text x="15" y="20" font-size="12" font-weight="700" fill="#f87171">3. ENFORCEMENT &amp; PENALTY (penalty_manager.py)</text>
+
+            <g transform="translate(15, 40)">
+              <rect width="135" height="95" rx="8" fill="#0f172a" stroke="#fbbf24" stroke-width="1"/>
+              <text x="10" y="20" font-size="10.5" font-weight="700" fill="#fbbf24">Level 1: Peringatan</text>
+              <text x="10" y="38" font-size="9" fill="#cbd5e1">- Audio TTS Voice</text>
+              <text x="10" y="54" font-size="9" fill="#cbd5e1">- Banner Toast UI</text>
+              <text x="10" y="72" font-size="9" fill="#94a3b8">Tanpa gembok layar</text>
+            </g>
+
+            <g transform="translate(165, 40)">
+              <rect width="140" height="95" rx="8" fill="#0f172a" stroke="#f87171" stroke-width="1"/>
+              <text x="10" y="20" font-size="10.5" font-weight="700" fill="#f87171">Level 2: Audio Mute</text>
+              <text x="10" y="38" font-size="9" fill="#cbd5e1">- Mute output suara</text>
+              <text x="10" y="54" font-size="9" fill="#cbd5e1">- Peringatan keras</text>
+              <text x="10" y="72" font-size="9" fill="#94a3b8">Cooldown 15 detik</text>
+            </g>
+
+            <g transform="translate(320, 40)">
+              <rect width="135" height="95" rx="8" fill="#0f172a" stroke="#dc2626" stroke-width="1.2"/>
+              <text x="10" y="20" font-size="10.5" font-weight="700" fill="#ef4444">Level 3: Lockdown</text>
+              <text x="10" y="38" font-size="9" fill="#cbd5e1">- Overlay Layar Penuh</text>
+              <text x="10" y="54" font-size="9" fill="#cbd5e1">- Block TaskMgr / AltTab</text>
+              <text x="10" y="72" font-size="9" fill="#f87171">Gembok Durasi 60s+</text>
+            </g>
+          </g>
+
+          <!-- 1.4 Guards & Network Client -->
+          <g transform="translate(25, 610)">
+            <rect width="470" height="150" rx="12" fill="url(#cardGrad)" stroke="#34d399" stroke-width="1.2"/>
+            <rect x="0" y="0" width="470" height="30" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 30 L 470 30 L 470 18 Z" fill="#1e293b"/>
+            <text x="15" y="20" font-size="12" font-weight="700" fill="#34d399">4. ANTI-TAMPER &amp; CLIENT NETWORK DAEMON</text>
+
+            <g transform="translate(15, 42)">
+              <rect width="210" height="92" rx="8" fill="#0f172a" stroke="#fbbf24" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">installer_guard.py</text>
+              <text x="12" y="40" font-size="9.5" fill="#cbd5e1">- Cegah eksekusi installer liar</text>
+              <text x="12" y="56" font-size="9.5" fill="#cbd5e1">- Blok kill proses tasklist</text>
+              <text x="12" y="72" font-size="9.5" fill="#fbbf24">- Auto Lapor ke Center</text>
+            </g>
+
+            <g transform="translate(240, 42)">
+              <rect width="215" height="92" rx="8" fill="#0f172a" stroke="#10b981" stroke-width="1.2"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">network_client.py</text>
+              <text x="12" y="40" font-size="9.5" fill="#cbd5e1">- Async TCP Socket Worker</text>
+              <text x="12" y="56" font-size="9.5" fill="#cbd5e1">- Heartbeat timer (10s)</text>
+              <text x="12" y="72" font-size="9.5" fill="#34d399">- Auto-reconnect (15s)</text>
+            </g>
+          </g>
+
+          <!-- 1.5 Auto Updater -->
+          <g transform="translate(25, 775)">
+            <rect width="470" height="90" rx="12" fill="url(#cardGrad)" stroke="#818cf8" stroke-width="1.2"/>
+            <rect x="0" y="0" width="470" height="28" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 28 L 470 28 L 470 18 Z" fill="#1e293b"/>
+            <text x="15" y="19" font-size="11" font-weight="700" fill="#818cf8">5. SILENT AUTO-UPDATER (updater.py)</text>
+
+            <g transform="translate(15, 36)">
+              <text x="5" y="18" font-size="10" fill="#cbd5e1">Dipicu strictly on-demand via push UPDATE_CLIENT dari Center. Download .zip silent.</text>
+              <text x="5" y="36" font-size="10" fill="#38bdf8">Extract &amp; hot-swap binary tanpa ganggu pemain aktif gaming.</text>
+            </g>
+          </g>
+        </g>
+
+        <!-- ZONE 2: PROTOCOL HIGHWAY -->
+        <g transform="translate(615, 155)">
+          <rect width="370" height="885" rx="20" fill="#0f172a" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+          <g transform="translate(20, 25)">
+            <rect width="140" height="32" rx="6" fill="#10b981"/>
+            <text x="12" y="21" font-size="12" font-weight="800" fill="#ffffff" letter-spacing="1">TCP PROTOCOL</text>
+            <text x="150" y="22" font-size="15" font-weight="800" fill="#f8fafc">Network Highway</text>
+          </g>
+
+          <!-- Uplink -->
+          <g transform="translate(20, 75)">
+            <rect width="330" height="235" rx="12" fill="#1e293b" stroke="#10b981" stroke-width="1.2"/>
+            <text x="15" y="25" font-size="12" font-weight="800" fill="#34d399">UPLINK PACKETS (Client -&gt; Server)</text>
+            <text x="15" y="42" font-size="9.5" fill="#94a3b8">JSON over TCP (Newline Delimited)</text>
+
+            <g transform="translate(15, 52)">
+              <rect width="300" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#38bdf8">REGISTER</text>
+              <text x="12" y="30" font-size="8.5" fill="#94a3b8">{name, ip, mac, app_version}</text>
+            </g>
+
+            <g transform="translate(15, 96)">
+              <rect width="300" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#34d399">HEARTBEAT</text>
+              <text x="12" y="30" font-size="8.5" fill="#94a3b8">Keep-alive interval 10s</text>
+            </g>
+
+            <g transform="translate(15, 140)">
+              <rect width="300" height="38" rx="6" fill="#0f172a" stroke="#f87171" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#f87171">VIOLATION</text>
+              <text x="12" y="30" font-size="8.5" fill="#cbd5e1">{level: 1..3, trigger: "...", timestamp}</text>
+            </g>
+
+            <g transform="translate(15, 186)">
+              <rect width="300" height="38" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#fbbf24">INSTALLER_BLOCKED</text>
+              <text x="12" y="30" font-size="8.5" fill="#cbd5e1">Alert percobaan eksekusi setup liar</text>
+            </g>
+          </g>
+
+          <!-- Downlink -->
+          <g transform="translate(20, 325)">
+            <rect width="330" height="295" rx="12" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2"/>
+            <text x="15" y="25" font-size="12" font-weight="800" fill="#38bdf8">DOWNLINK PACKETS (Server -&gt; Client)</text>
+            <text x="15" y="42" font-size="9.5" fill="#94a3b8">Remote Command &amp; Sync Control</text>
+
+            <g transform="translate(15, 52)">
+              <rect width="300" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#f87171">REMOTE_LOCK</text>
+              <text x="12" y="30" font-size="8.5" fill="#94a3b8">Gembok layar dari admin {duration: 60s}</text>
+            </g>
+
+            <g transform="translate(15, 96)">
+              <rect width="300" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#34d399">RESET_LEVEL</text>
+              <text x="12" y="30" font-size="8.5" fill="#94a3b8">Lepas gembok overlay &amp; reset pelanggaran</text>
+            </g>
+
+            <g transform="translate(15, 140)">
+              <rect width="300" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#fbbf24">REMOTE_WARNING</text>
+              <text x="12" y="30" font-size="8.5" fill="#94a3b8">Kirim pesan alert admin ke layar klien</text>
+            </g>
+
+            <g transform="translate(15, 184)">
+              <rect width="300" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#818cf8">UPDATE_CLIENT</text>
+              <text x="12" y="30" font-size="8.5" fill="#94a3b8">Trigger download release terbaru dari GitHub</text>
+            </g>
+
+            <g transform="translate(15, 228)">
+              <rect width="300" height="52" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="18" font-size="10.5" font-weight="700" fill="#c084fc">SYNC_SANCTIONS &amp; WORDLIST</text>
+              <text x="12" y="32" font-size="8.5" fill="#94a3b8">Sync kamus kata kotor &amp; aturan hukuman</text>
+              <text x="12" y="44" font-size="8.5" fill="#94a3b8">tanpa perlu restart aplikasi klien</text>
+            </g>
+          </g>
+
+          <!-- External Cloud -->
+          <g transform="translate(20, 635)">
+            <rect width="330" height="230" rx="12" fill="#1e293b" stroke="#818cf8" stroke-width="1.2"/>
+            <text x="15" y="25" font-size="12" font-weight="800" fill="#818cf8">EXTERNAL CLOUD DISTRIBUTION</text>
+            <text x="15" y="42" font-size="9.5" fill="#94a3b8">GitHub Releases Cloud Delivery</text>
+
+            <g transform="translate(15, 52)">
+              <rect width="300" height="70" rx="8" fill="#0f172a" stroke="#818cf8" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">GitHub Releases Repo API</text>
+              <text x="12" y="38" font-size="9" fill="#94a3b8">Endpoint: /repos/.../releases/latest</text>
+              <text x="12" y="52" font-size="9" fill="#38bdf8">Asset: GC.Toxic.Shield.zip</text>
+            </g>
+
+            <g transform="translate(15, 132)">
+              <rect width="300" height="85" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="20" font-size="10.5" font-weight="700" fill="#34d399">Zero Interruption Auto-Update:</text>
+              <text x="12" y="36" font-size="9" fill="#cbd5e1">1. Background check &amp; download hash</text>
+              <text x="12" y="52" font-size="9" fill="#cbd5e1">2. Ekstraksi senyap ke cache staging</text>
+              <text x="12" y="68" font-size="9" fill="#cbd5e1">3. Atomic swap file saat reboot/idle</text>
+            </g>
+          </g>
+        </g>
+
+        <!-- Link Flow Arrows -->
+        <path d="M 545 700 L 615 250" stroke="#10b981" stroke-width="2" stroke-dasharray="4,4" marker-end="url(#arrow-green)"/>
+        <path d="M 615 450 L 545 720" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow-blue)"/>
+        <path d="M 545 825 L 615 720" stroke="#818cf8" stroke-width="2" marker-end="url(#arrow-purple)"/>
+
+        <!-- ZONE 3: ADMIN CENTER -->
+        <g transform="translate(1015, 155)">
+          <rect width="525" height="885" rx="20" fill="url(#serverGrad)" stroke="#fbbf24" stroke-width="2" filter="url(#shadow)"/>
+          <g transform="translate(25, 25)">
+            <rect width="170" height="32" rx="6" fill="#d97706"/>
+            <text x="15" y="21" font-size="12" font-weight="800" fill="#ffffff" letter-spacing="1">ADMIN CONTROLLER</text>
+            <text x="185" y="22" font-size="16" font-weight="800" fill="#f8fafc">GC Toxic Shield Center</text>
+            <text x="385" y="22" font-size="12" font-weight="500" fill="#fbbf24">(Operator Desktop)</text>
+          </g>
+
+          <!-- 3.1 Server Core -->
+          <g transform="translate(25, 75)">
+            <rect width="475" height="155" rx="12" fill="url(#cardGrad)" stroke="#fbbf24" stroke-width="1.2"/>
+            <rect x="0" y="0" width="475" height="30" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 30 L 475 30 L 475 18 Z" fill="#1e293b"/>
+            <text x="15" y="20" font-size="12" font-weight="700" fill="#fbbf24">1. ASYNC TCP SERVER CORE (server_core.py)</text>
+
+            <g transform="translate(15, 42)">
+              <rect width="215" height="100" rx="8" fill="#0f172a" stroke="#fbbf24" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">TCP Server Daemon</text>
+              <text x="12" y="40" font-size="9.5" fill="#cbd5e1">- Bind 0.0.0.0 Port 9000</text>
+              <text x="12" y="56" font-size="9.5" fill="#cbd5e1">- Asyncio event loop handler</text>
+              <text x="12" y="72" font-size="9.5" fill="#cbd5e1">- Multi-client non-blocking</text>
+              <text x="12" y="88" font-size="9.5" fill="#34d399">- Timeout checker (30 detik)</text>
+            </g>
+
+            <g transform="translate(245, 42)">
+              <rect width="215" height="100" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">ConnectionManager</text>
+              <text x="12" y="40" font-size="9.5" fill="#cbd5e1">- Registry MAC &amp; IP address</text>
+              <text x="12" y="56" font-size="9.5" fill="#cbd5e1">- Status: ONLINE / OFFLINE</text>
+              <text x="12" y="72" font-size="9.5" fill="#cbd5e1">- Heartbeat tracker</text>
+              <text x="12" y="88" font-size="9.5" fill="#38bdf8">- Dynamic client map dispatch</text>
+            </g>
+          </g>
+
+          <!-- 3.2 UI -->
+          <g transform="translate(25, 245)">
+            <rect width="475" height="225" rx="12" fill="url(#cardGrad)" stroke="#38bdf8" stroke-width="1.2"/>
+            <rect x="0" y="0" width="475" height="30" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 30 L 475 30 L 475 18 Z" fill="#1e293b"/>
+            <text x="15" y="20" font-size="12" font-weight="700" fill="#38bdf8">2. OPERATOR DASHBOARD UI (dashboard_ui.py)</text>
+
+            <g transform="translate(15, 42)">
+              <rect width="445" height="85" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">PC Monitor Grid (Instant Render on Startup)</text>
+              <text x="12" y="40" font-size="9.5" fill="#cbd5e1">- Posisi statis konsisten menggunakan Natural Sort Key (PC-01, PC-02, ...)</text>
+              <text x="12" y="56" font-size="9.5" fill="#cbd5e1">- Visual status card: Hijau (LISTENING), Kuning (WARNING), Merah (LOCKED)</text>
+              <text x="12" y="72" font-size="9.5" fill="#34d399">- Tidak lompat-lompat saat PC restart atau online/offline bergantian</text>
+            </g>
+
+            <g transform="translate(15, 137)">
+              <rect width="215" height="75" rx="8" fill="#0f172a" stroke="#f87171" stroke-width="1"/>
+              <text x="12" y="20" font-size="10.5" font-weight="700" fill="#f87171">Live Feed Log Stream</text>
+              <text x="12" y="36" font-size="9" fill="#cbd5e1">- Pelanggaran realtime</text>
+              <text x="12" y="50" font-size="9" fill="#cbd5e1">- Alert blocked setup</text>
+              <text x="12" y="64" font-size="9" fill="#94a3b8">- Filter per PC &amp; tanggal</text>
+            </g>
+
+            <g transform="translate(245, 137)">
+              <rect width="215" height="75" rx="8" fill="#0f172a" stroke="#fbbf24" stroke-width="1"/>
+              <text x="12" y="20" font-size="10.5" font-weight="700" fill="#fbbf24">PC Action Context Menu</text>
+              <text x="12" y="36" font-size="9" fill="#cbd5e1">- 🔄 Update Klien (GitHub)</text>
+              <text x="12" y="50" font-size="9" fill="#cbd5e1">- 🔓 Reset Hukuman / Unlock</text>
+              <text x="12" y="64" font-size="9" fill="#cbd5e1">- 🗑️ Hapus Data PC (Clean)</text>
+            </g>
+          </g>
+
+          <!-- 3.3 Configurator -->
+          <g transform="translate(25, 485)">
+            <rect width="475" height="175" rx="12" fill="url(#cardGrad)" stroke="#c084fc" stroke-width="1.2"/>
+            <rect x="0" y="0" width="475" height="30" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 30 L 475 30 L 475 18 Z" fill="#1e293b"/>
+            <text x="15" y="20" font-size="12" font-weight="700" fill="#c084fc">3. CONFIGURATOR &amp; ANALYTICS ENGINE</text>
+
+            <g transform="translate(15, 42)">
+              <rect width="215" height="118" rx="8" fill="#0f172a" stroke="#c084fc" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">Rules &amp; Sanctions Hub</text>
+              <text x="12" y="42" font-size="9.5" fill="#cbd5e1">- Atur durasi penalti</text>
+              <text x="12" y="58" font-size="9.5" fill="#cbd5e1">- Atur ambang mic sensitivity</text>
+              <text x="12" y="74" font-size="9.5" fill="#cbd5e1">- Broadcast update kamus</text>
+              <text x="12" y="90" font-size="9.5" fill="#34d399">- Auto-sync ke semua klien</text>
+            </g>
+
+            <g transform="translate(245, 42)">
+              <rect width="215" height="118" rx="8" fill="#0f172a" stroke="#818cf8" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">Historical Analytics</text>
+              <text x="12" y="42" font-size="9.5" fill="#cbd5e1">- Rekap total kata kotor</text>
+              <text x="12" y="58" font-size="9.5" fill="#cbd5e1">- Top offending PC rank</text>
+              <text x="12" y="74" font-size="9.5" fill="#cbd5e1">- Export CSV violation report</text>
+              <text x="12" y="90" font-size="9.5" fill="#818cf8">- Analisis tren jam ramai</text>
+            </g>
+          </g>
+
+          <!-- 3.4 Storage -->
+          <g transform="translate(25, 675)">
+            <rect width="475" height="190" rx="12" fill="url(#cardGrad)" stroke="#34d399" stroke-width="1.2"/>
+            <rect x="0" y="0" width="475" height="30" rx="12" fill="#1e293b"/>
+            <path d="M 0 18 L 0 30 L 475 30 L 475 18 Z" fill="#1e293b"/>
+            <text x="15" y="20" font-size="12" font-weight="700" fill="#34d399">4. PERSISTENCE LAYER (%APPDATA%\GC Toxic Shield Center\)</text>
+
+            <g transform="translate(15, 42)">
+              <rect width="215" height="132" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">server_config.json</text>
+              <text x="12" y="40" font-size="9.5" fill="#cbd5e1">- MAC Address Registry</text>
+              <text x="12" y="56" font-size="9.5" fill="#cbd5e1">- IP &amp; WAN IP Registry</text>
+              <text x="12" y="72" font-size="9.5" fill="#cbd5e1">- Custom PC alias names</text>
+              <text x="12" y="88" font-size="9.5" fill="#cbd5e1">- Server port configuration</text>
+              <text x="12" y="112" font-size="9.5" fill="#34d399">Clean wipe on delete action</text>
+            </g>
+
+            <g transform="translate(245, 42)">
+              <rect width="215" height="132" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+              <text x="12" y="22" font-size="11" font-weight="700" fill="#f8fafc">violation_log.json</text>
+              <text x="12" y="40" font-size="9.5" fill="#cbd5e1">- Log waktu pelanggaran</text>
+              <text x="12" y="56" font-size="9.5" fill="#cbd5e1">- Kata toxic terdeteksi</text>
+              <text x="12" y="72" font-size="9.5" fill="#cbd5e1">- Level penalti diterapkan</text>
+              <text x="12" y="88" font-size="9.5" fill="#cbd5e1">- Blocked installer alerts</text>
+              <text x="12" y="112" font-size="9.5" fill="#f87171">Realtime append &amp; rotate</text>
+            </g>
+          </g>
+        </g>
+
+        <!-- Center links -->
+        <path d="M 950 250 L 1015 150" stroke="#10b981" stroke-width="2" marker-end="url(#arrow-green)"/>
+        <path d="M 1015 450 L 950 450" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow-blue)"/>
+        <path d="M 985 750 L 1015 750" stroke="#818cf8" stroke-width="2" stroke-dasharray="3,3"/>
+
+        <!-- FOOTER LEGEND -->
+        <g transform="translate(60, 1055)">
+          <circle cx="10" cy="15" r="5" fill="#38bdf8"/>
+          <text x="22" y="19" font-size="11" font-weight="600" fill="#94a3b8">Audio &amp; Voice Capture</text>
+
+          <circle cx="180" cy="15" r="5" fill="#c084fc"/>
+          <text x="192" y="19" font-size="11" font-weight="600" fill="#94a3b8">ASR &amp; Detection Engine</text>
+
+          <circle cx="370" cy="15" r="5" fill="#f87171"/>
+          <text x="382" y="19" font-size="11" font-weight="600" fill="#94a3b8">Penalty &amp; Lockdown</text>
+
+          <circle cx="540" cy="15" r="5" fill="#10b981"/>
+          <text x="552" y="19" font-size="11" font-weight="600" fill="#94a3b8">TCP Sockets &amp; Packets</text>
+
+          <circle cx="730" cy="15" r="5" fill="#fbbf24"/>
+          <text x="742" y="19" font-size="11" font-weight="600" fill="#94a3b8">Center Admin &amp; Storage</text>
+
+          <circle cx="920" cy="15" r="5" fill="#818cf8"/>
+          <text x="932" y="19" font-size="11" font-weight="600" fill="#94a3b8">GitHub Silent Auto-Update</text>
+
+          <text x="1350" y="19" font-size="11" font-weight="500" fill="#64748b">GC Toxic Shield Architecture v2.2</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <div class="hint">🖱️ Drag mouse untuk geser • Scroll wheel untuk Zoom</div>
+
+  <script>
+    const viewport = document.getElementById('viewport');
+    const canvas = document.getElementById('canvas');
+
+    let scale = 1;
+    let posX = 0;
+    let posY = 0;
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+
+    function updateTransform() {
+      canvas.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+    }
+
+    function fitView() {
+      const vWidth = viewport.clientWidth;
+      const vHeight = viewport.clientHeight;
+      const svgWidth = 1600;
+      const svgHeight = 1100;
+
+      const scaleX = vWidth / (svgWidth + 60);
+      const scaleY = vHeight / (svgHeight + 60);
+      scale = Math.min(scaleX, scaleY, 1.2);
+
+      posX = (vWidth - svgWidth * scale) / 2;
+      posY = (vHeight - svgHeight * scale) / 2;
+      updateTransform();
+    }
+
+    function resetView() {
+      scale = 1;
+      const vWidth = viewport.clientWidth;
+      const vHeight = viewport.clientHeight;
+      posX = (vWidth - 1600) / 2;
+      posY = (vHeight - 1100) / 2;
+      updateTransform();
+    }
+
+    function zoom(delta) {
+      const newScale = Math.min(Math.max(0.3, scale + delta), 3.0);
+      const factor = newScale / scale;
+      
+      const vWidth = viewport.clientWidth / 2;
+      const vHeight = viewport.clientHeight / 2;
+      
+      posX = vWidth - (vWidth - posX) * factor;
+      posY = vHeight - (vHeight - posY) * factor;
+      scale = newScale;
+      updateTransform();
+    }
+
+    // Pan / Drag handlers
+    viewport.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      isDragging = true;
+      startX = e.clientX - posX;
+      startY = e.clientY - posY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      posX = e.clientX - startX;
+      posY = e.clientY - startY;
+      updateTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    // Zoom on wheel
+    viewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 0.1 : -0.1;
+      zoom(zoomFactor);
+    }, { passive: false });
+
+    // Initial setup
+    window.addEventListener('resize', fitView);
+    window.addEventListener('DOMContentLoaded', fitView);
+    fitView();
+  </script>
+</body>
+</html>
