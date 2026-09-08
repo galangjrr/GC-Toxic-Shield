@@ -88,6 +88,25 @@ Pemasangan ke komputer Klien warnet sangat mudah, tidak perlu *Copy-Paste* manua
 
 ---
 
+## Project Structure
+
+```text
+GC-Toxic-Shield/
+├── app/             # Application core modules
+├── assets/          # Icons, word_list.json, config.json, sanksi_custom.json
+├── build_tools/     # PyInstaller build.py & UAC manifest
+├── docs/            # Handover, PRD, diagrams & calibration/
+├── scripts/         # Dev utilities & emergency_repair.ps1
+├── tests/           # All test suites + conftest.py
+├── install.ps1      # Client one-liner installer
+├── main.py          # Main entry point
+├── README.md        # Project documentation
+├── requirements.txt # Dependencies
+└── .gitignore       # Build/binary ignore rules
+```
+
+---
+
 ## Architecture & Build
 
 Modul `build.py` telah dikonfigurasi menggunakan PyInstaller. Cukup jalankan perintah ini di VSCode/Terminal utama:
