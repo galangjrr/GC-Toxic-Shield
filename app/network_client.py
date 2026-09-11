@@ -66,9 +66,7 @@ class NetworkClient(QObject):
     update_config_signal = Signal(dict)
     apply_sanctions_signal = Signal(list)
     apply_wordlist_signal = Signal(dict)
-    apply_guard_config_signal = Signal(dict)
     remote_wol_signal = Signal(str)
-    apply_ai_model_signal = Signal(str)
 
     def __init__(
         self,
@@ -80,7 +78,6 @@ class NetworkClient(QObject):
         detector=None,      # ToxicDetector instance untuk hot-reload wordlist
         app_version: str = "v1.0.0",
         auth_service: Optional[AuthService] = None,
-        installer_guard=None,  # InstallerGuard instance for hot-reload
     ):
         super().__init__()
         self.server_ip = server_ip
@@ -91,7 +88,6 @@ class NetworkClient(QObject):
         self._detector = detector
         self._auth_service = auth_service
         self._app_version = app_version
-        self._installer_guard = installer_guard
 
         # Connect signals to slots
         self.remote_lock_signal.connect(self._execute_remote_lock)
@@ -101,9 +97,7 @@ class NetworkClient(QObject):
         self.update_config_signal.connect(self._execute_update_config)
         self.apply_sanctions_signal.connect(self._execute_apply_sanctions)
         self.apply_wordlist_signal.connect(self._execute_apply_wordlist)
-        self.apply_guard_config_signal.connect(self._execute_apply_guard_config)
         self.remote_wol_signal.connect(self._execute_remote_wol)
-        self.apply_ai_model_signal.connect(self._execute_apply_ai_model)
 
         # ── State ──
         self._running = False
@@ -463,16 +457,6 @@ class NetworkClient(QObject):
                 logger.info("📖 %s received", ptype)
                 self._apply_wordlist_sync(wordlist_data)
 
-            elif ptype in ("SYNC_GUARD_CONFIG", "SYNC_GUARD_CONFIG_TARGETED"):
-                guard_config = packet.get("guard_config", {})
-                logger.info("🛡️ %s received", ptype)
-                self._apply_guard_config_sync(guard_config)
-
-            elif ptype == "SYNC_AI_MODEL":
-                model_b64 = packet.get("model_base64", "")
-                logger.info("🧠 SYNC_AI_MODEL received")
-                self.apply_ai_model_signal.emit(model_b64)
-
             elif ptype == "UPDATE_CONFIG":
                 new_config = packet.get("config", {})
                 logger.info("⚙️ UPDATE_CONFIG received: %r", new_config)
@@ -618,23 +602,6 @@ class NetworkClient(QObject):
             logger.error("REMOTE_LOCK dispatch error: %s", e)
 
 
-    def _execute_apply_ai_model(self, model_b64: str):
-        try:
-            import base64
-            import os
-            # Save to root dir of the app
-            model_path = os.path.join(os.getcwd(), "nlp_model.pkl")
-            model_bytes = base64.b64decode(model_b64)
-            with open(model_path, 'wb') as f:
-                f.write(model_bytes)
-            logger.info("✅ Model AI berhasil disimpan ke %s", model_path)
-            
-            # Hot reload detector
-            if self._detector and hasattr(self._detector, "reload_ai_model"):
-                self._detector.reload_ai_model(model_path)
-        except Exception as e:
-            logger.error("Gagal menyimpan model AI: %s", e)
-
     def _dispatch_remote_warning(self, message: str, trigger: str = "[REMOTE]"):
         """Emit REMOTE_WARNING signal."""
         if not self._penalty_mgr or not self._root:
@@ -753,14 +720,6 @@ class NetworkClient(QObject):
                     SystemService.toggle_installer_block(False)
 
             auth._save_config()
-            
-            # Hot-reload InstallerGuard state
-            if hasattr(self, '_installer_guard') and self._installer_guard:
-                self._installer_guard.reload(
-                    block_installer=new_config.get('BlockInstaller', None),
-                    block_settings=new_config.get('BlockSettings', None)
-                )
-            
             logger.info("✓ Configuration synced and applied from Server.")
 
             # If IP Changed, notify and exit to force reconnect
@@ -821,29 +780,6 @@ class NetworkClient(QObject):
             logger.info("✓ wordlist_data synced and applied successfully.")
         except Exception as e:
             logger.error("Wordlist sync error: %s", e)
-
-    def _apply_guard_config_sync(self, guard_config: dict):
-        """Emit guard sync signal."""
-        if self._root:
-            self.apply_guard_config_signal.emit(guard_config)
-        else:
-            self._execute_apply_guard_config(guard_config)
-
-    def _execute_apply_guard_config(self, guard_config: dict):
-        from app._paths import GUARD_CONFIG_PATH
-        import json
-        
-        try:
-            with open(GUARD_CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(guard_config, f, ensure_ascii=False, indent=2)
-            
-            # Hot reload guard config if instance available
-            if hasattr(self, "_installer_guard") and self._installer_guard:
-                self._installer_guard.load_config()
-                
-            logger.info("✓ guard_config synced and applied successfully.")
-        except Exception as e:
-            logger.error("Guard config sync error: %s", e)
 
     def _get_local_ip(self) -> str:
         """Dapatkan local IP yang digunakan untuk komunikasi ke server."""

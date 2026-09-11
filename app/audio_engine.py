@@ -355,6 +355,7 @@ class AudioEngine(QObject):
                     try:
                         logger.info("Calibrating ambient noise (1s)...")
                         self._recognizer.adjust_for_ambient_noise(source, duration=1.0)
+                        self._recognizer.energy_threshold = max(50.0, min(self._recognizer.energy_threshold, 300.0))
                         logger.info(
                             "Ambient noise calibrated → energy_threshold=%.1f",
                             self._recognizer.energy_threshold
@@ -396,16 +397,20 @@ class AudioEngine(QObject):
                                 )
                                 continue
 
-                            # ── Proximity Zone Gate ──
-                            # Evaluasi RMS chunk sebelum kirim ke Google STT.
-                            # Zona IGNORE dibuang di sini — suara desis & bocor PC sebelah tidak pernah sampai ke cloud.
+                            # ── Silence Filter ──
                             chunk_rms = self._calculate_rms(detached_audio)
-                            if not self._is_rms_in_process_zone(chunk_rms):
-                                logger.debug(
-                                    "Proximity IGNORED: rms=%.4f (desis/bocor)",
-                                    chunk_rms
-                                )
+                            if chunk_rms < MIN_RMS_THRESHOLD:
+                                logger.debug("Silence ignored: rms=%.4f", chunk_rms)
                                 continue
+
+                            # Check proximity filter only if explicitly configured
+                            if hasattr(self, "proximity_zones") and self.proximity_zones:
+                                if not self._is_rms_in_process_zone(chunk_rms):
+                                    logger.debug(
+                                        "Proximity IGNORED: rms=%.4f",
+                                        chunk_rms
+                                    )
+                                    continue
 
                             # >>> ASYNC DISPATCH — never blocks listen loop <<<
                             threading.Thread(
@@ -549,10 +554,8 @@ class AudioEngine(QObject):
     # Format: (min_rms, max_rms, action)
     # action="PROCESS" → kirim ke STT | action="IGNORE" → buang
     _DEFAULT_PROXIMITY_ZONES = [
-        (0.000, 0.050, "IGNORE"),   # Desis AC/kipas/background noise
-        (0.051, 0.300, "PROCESS"),  # Suara mulut user normal
-        (0.301, 0.450, "IGNORE"),   # Teriakan bocor dari PC sebelah
-        (0.451, 1.000, "PROCESS"),  # Teriakan langsung ke mic user
+        (0.000, 0.001, "IGNORE"),   # Silence mutlak
+        (0.001, 1.000, "PROCESS"),  # Semua suara percakapan & teriakan
     ]
 
     def _is_rms_in_process_zone(self, rms: float) -> bool:
@@ -580,8 +583,8 @@ class AudioEngine(QObject):
             if min_r <= rms <= max_r:
                 return action == "PROCESS"
 
-        # Tidak ada zona yang cocok → buang (safe default)
-        return False
+        # Default fallback: izinkan proses jika di luar zona
+        return True
 
     def _calculate_rms(self, audio: "sr.AudioData") -> float:
         """Calculate the Root Mean Square energy of an audio chunk.

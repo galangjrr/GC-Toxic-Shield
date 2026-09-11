@@ -2,7 +2,7 @@
 
 # GC Toxic Shield
 **Brand:** GC Net Security Suite  
-**Version:** 2.0.0 (PySide6 Edition)  
+**Version:** 2.0.1 (PySide6 Edition)  
 **Target OS:** Windows 10/11 x64  
 **Hardware Profile:** Optimized for maximum CPU efficiency (Integrated Graphics friendly)
 

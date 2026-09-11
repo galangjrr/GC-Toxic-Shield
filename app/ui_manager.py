@@ -232,7 +232,6 @@ class AdminDashboard(QMainWindow):
         self._auth = auth_service
         self._app_version = app_version
         self._github_repo = github_repo
-        self._installer_guard = None
         self._on_close = on_close
 
         if self._penalty_mgr:
@@ -328,9 +327,8 @@ class AdminDashboard(QMainWindow):
         tabs = [
             ("📡 Live Monitor", 0),
             ("📝 Manajemen Kata", 1),
-            ("🛡 Installer Guard", 2),
-            ("📜 Daftar Sanksi", 3),
-            ("⚙ Pengaturan", 4),
+            ("📜 Daftar Sanksi", 2),
+            ("⚙ Pengaturan", 3),
         ]
 
         for label, index in tabs:
@@ -382,7 +380,6 @@ class AdminDashboard(QMainWindow):
         
         self._build_monitor_tab()
         self._build_wordlist_tab()
-        self._build_installer_guard_tab()
         self._build_sanctions_tab()
         self._build_settings_tab()
 
@@ -415,7 +412,6 @@ class AdminDashboard(QMainWindow):
         titles = [
             "📡 Live Streaming Monitor",
             "📝 Manajemen Sensor Kata",
-            "🛡 Installer Guard Blokir Pihak Ke-3",
             "📜 Konfigurasi Sistem Sanksi",
             "⚙ Pengaturan Admin"
         ]
@@ -828,176 +824,6 @@ class AdminDashboard(QMainWindow):
                 json.dump(data, f, ensure_ascii=False, indent=4)
         except Exception as e:
             logger.error("Failed to save wordlist: %s", e)
-
-    # ================================================================
-    # TAB 3: INSTALLER GUARD
-    # ================================================================
-
-    def _build_installer_guard_tab(self):
-        page = QWidget()
-        main_layout = QVBoxLayout(page)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("background-color: transparent;")
-        
-        content_widget = QWidget()
-        layout = QVBoxLayout(content_widget)
-        
-        # Helper function to create a table setup
-        def setup_guard_table(title, color, attr_name):
-            card = QFrame()
-            card.setProperty("class", "Card")
-            card.setGraphicsEffect(create_shadow())
-            c_lyt = QVBoxLayout(card)
-            
-            lbl = QLabel(title)
-            lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 12px;")
-            c_lyt.addWidget(lbl)
-            
-            table = QTableWidget(0, 1)
-            table.setHorizontalHeaderLabels(["Kata Kunci / Path"])
-            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            table.setSelectionBehavior(QAbstractItemView.SelectItems)
-            table.verticalHeader().setVisible(False)
-            setattr(self, attr_name, table)
-            c_lyt.addWidget(table)
-            
-            blyt = QHBoxLayout()
-            blyt.setContentsMargins(0, 0, 0, 0)
-            btn_add = QPushButton("➕ Tambah")
-            btn_add.setProperty("class", "ActionBtn BtnSuccess")
-            btn_add.clicked.connect(lambda: self._add_table_row(table))
-            
-            btn_del = QPushButton("🗑 Hapus")
-            btn_del.setProperty("class", "ActionBtn BtnDanger")
-            btn_del.clicked.connect(lambda: self._delete_table_row(table))
-            
-            blyt.addWidget(btn_add)
-            blyt.addWidget(btn_del)
-            c_lyt.addLayout(blyt)
-            
-            return card
-
-        # Top Row: Custom Blacklist
-        top_card = setup_guard_table("⛔ Daftar Hitam Kustom (cth: tiktok live studio)", DANGER, "_guard_blacklist_textbox")
-        layout.addWidget(top_card, 1)
-
-        # Bottom Row: Unified Whitelist
-        bottom_card = setup_guard_table("✅ Pengecualian / Whitelist (cth: D:\\Games\\ atau game.exe)", SUCCESS, "_guard_whitelist_textbox")
-        layout.addWidget(bottom_card, 1)
-
-        # Buttons
-        btn_frame = QWidget()
-        btn_lyt = QHBoxLayout(btn_frame)
-        btn_lyt.setContentsMargins(0, 0, 0, 0)
-        
-        sys_btn = QPushButton("💾 Simpan")
-        sys_btn.setProperty("class", "ActionBtn BtnPrimary")
-        sys_btn.setFixedSize(120, 34)
-        sys_btn.clicked.connect(self._save_guard_config)
-        btn_lyt.addWidget(sys_btn)
-        
-        ref_btn = QPushButton("🔄 Segarkan")
-        ref_btn.setProperty("class", "ActionBtn BtnOutline")
-        ref_btn.setFixedSize(120, 34)
-        ref_btn.clicked.connect(self._refresh_guard_config_display)
-        btn_lyt.addWidget(ref_btn)
-
-        import_btn = QPushButton("📂 Muat dari File")
-        import_btn.setProperty("class", "ActionBtn BtnWarning")
-        import_btn.setFixedSize(140, 34)
-        import_btn.clicked.connect(self._import_guard_config_json)
-        btn_lyt.addWidget(import_btn)
-        
-        btn_lyt.addStretch()
-        layout.addWidget(btn_frame)
-
-        scroll.setWidget(content_widget)
-        main_layout.addWidget(scroll)
-
-        self.stack.addWidget(page)
-
-    def _import_guard_config_json(self):
-        from PySide6.QtWidgets import QFileDialog
-        import json
-        
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Import Installer Guard Konfigurasi", "", "JSON Files (*.json)"
-        )
-        if not file_path:
-            return
-            
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-                
-            def populate(table, items):
-                table.setRowCount(len(items))
-                for i, it in enumerate(items):
-                    table.setItem(i, 0, QTableWidgetItem(str(it)))
-                    
-            if hasattr(self, '_guard_blacklist_textbox'):
-                populate(self._guard_blacklist_textbox, config.get("blacklist", []))
-                
-                unified_whitelist = config.get("whitelist_processes", []) + config.get("whitelist_paths", [])
-                if hasattr(self, '_guard_whitelist_textbox'):
-                    populate(self._guard_whitelist_textbox, unified_whitelist)
-                
-            QMessageBox.information(self, "Preview Import", "Berhasil pratinjau data Installer Guard dari file.\nSilakan tekan 'Simpan' untuk menerapkannya secara permanen.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error Import", f"Gagal membaca file JSON:\n{e}")
-
-    def _refresh_guard_config_display(self):
-        config = self._load_guard_config()
-        if hasattr(self, '_guard_blacklist_textbox'):
-            def populate(table, items):
-                table.setRowCount(len(items))
-                for i, it in enumerate(items):
-                    table.setItem(i, 0, QTableWidgetItem(it))
-                    
-            populate(self._guard_blacklist_textbox, config.get("blacklist", []))
-            unified = config.get("whitelist_processes", []) + config.get("whitelist_paths", [])
-            if hasattr(self, '_guard_whitelist_textbox'):
-                populate(self._guard_whitelist_textbox, unified)
-
-    def _load_guard_config(self) -> dict:
-        from app._paths import GUARD_CONFIG_PATH
-        if os.path.exists(GUARD_CONFIG_PATH):
-            try:
-                with open(GUARD_CONFIG_PATH, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error("Failed to load guard config: %s", e)
-        # HIDE SYSTEM DEFAULTS: Only show custom rules
-        return {"blacklist": [], "whitelist_processes": [], "whitelist_paths": []}
-
-    def _save_guard_config(self):
-        from app._paths import GUARD_CONFIG_PATH
-        try:
-            bl = self._get_table_words(self._guard_blacklist_textbox)
-            unified = self._get_table_words(self._guard_whitelist_textbox)
-            
-            pr = []
-            pa = []
-            for item in unified:
-                if "\\" in item or ":" in item or "/" in item:
-                    pa.append(item)
-                else:
-                    pr.append(item)
-                    
-            config = {"blacklist": bl, "whitelist_processes": pr, "whitelist_paths": pa}
-            with open(GUARD_CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
-                
-            if self._installer_guard:
-                self._installer_guard.load_config()
-            QMessageBox.information(self, "Berhasil", "Konfigurasi Installer Guard disimpan.")
-        except Exception as e:
-            logger.error("Failed to save guard config: %s", e)
-            QMessageBox.critical(self, "Gagal", f"Gagal menyimpan config:\n{e}")
 
     def _build_sanctions_tab(self):
         page = QWidget()
@@ -1592,8 +1418,6 @@ class AdminDashboard(QMainWindow):
         SystemService.toggle_microphone_privacy_lock(checked)
         if success:
             if self._auth: self._auth._config["BlockSettings"] = checked; self._auth._save_config()
-            if getattr(self, '_installer_guard', None):
-                self._installer_guard.reload(block_settings=checked)
             QMessageBox.information(self, "OK", f"Settings & Mic Privacy: {'TERKUNCI' if checked else 'TERBUKA'}")
         else:
             QMessageBox.critical(self, "Error", "Gagal. Jalankan sebagai Administrator.")
@@ -1606,8 +1430,6 @@ class AdminDashboard(QMainWindow):
         success = SystemService.toggle_installer_block(checked)
         if success:
             if self._auth: self._auth._config["BlockInstaller"] = checked; self._auth._save_config()
-            if getattr(self, '_installer_guard', None):
-                self._installer_guard.reload(block_installer=checked)
             QMessageBox.information(self, "OK", f"Instalasi: {'DIBLOKIR' if checked else 'DIIZINKAN'}")
         else:
             QMessageBox.critical(self, "Error", "Gagal. Jalankan sebagai Administrator.")

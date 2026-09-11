@@ -45,7 +45,7 @@ def check_pyinstaller():
 
 def build():
     print("\n" + "━" * 60)
-    print("  GC Toxic Shield — Build Script (Google Speech Edition) v2.0.0")
+    print("  GC Toxic Shield — Build Script (Google Speech Edition) v2.0.1")
     print("━" * 60 + "\n")
 
     if not check_pyinstaller():
@@ -98,7 +98,6 @@ def build():
         "--hidden-import", "app.login_dialog",
         "--hidden-import", "app.static_data",
         "--hidden-import", "app.network_client",
-        "--hidden-import", "app.installer_guard",
         "--hidden-import", "app.updater",
 
         # ── Exclude bloat (AI offline + lib tidak terpakai) ──

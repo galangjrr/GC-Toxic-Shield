@@ -46,7 +46,7 @@ logger = logging.getLogger("GCToxicShield")
 
 # ── Constants ────────────────────────────────────────────────
 APP_NAME = "GC Toxic Shield"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 BRAND = "GC Net Security Suite"
 GITHUB_REPO = "galangjrr/GC-Toxic-Shield"  # <-- Admin warns to replace this
 
@@ -119,26 +119,53 @@ def validate_assets_directory() -> bool:
     return True
 
 
+_app_mutex = None
+_app_lock_file = None
+
+
 def enforce_singleton():
     """
     Memastikan hanya satu instance aplikasi yang berjalan.
+    Dual-layer: Windows Named Mutex + msvcrt file lock kernel.
     """
-    mutex_name = "Global\\GC_Toxic_Shield_Mutex_v2"
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
-    last_error = ctypes.windll.kernel32.GetLastError()
-    
-    if last_error == 183:  # ERROR_ALREADY_EXISTS
+    global _app_mutex, _app_lock_file
+
+    if _app_lock_file is not None or _app_mutex is not None:
+        return _app_mutex
+
+    already_running = False
+
+    # Layer 1: Kernel file lock via msvcrt
+    import tempfile
+    import msvcrt
+    lock_path = os.path.join(tempfile.gettempdir(), "gc_toxic_shield.lock")
+    try:
+        _app_lock_file = open(lock_path, "a+")
+        _app_lock_file.seek(0)
+        msvcrt.locking(_app_lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+    except (IOError, OSError, PermissionError):
+        already_running = True
+
+    # Layer 2: Win32 Named Mutex
+    if not already_running:
+        mutex_name = r"Global\GC_Toxic_Shield_Mutex_v2"
+        _app_mutex = ctypes.windll.kernel32.CreateMutexW(None, True, mutex_name)
+        last_error = ctypes.windll.kernel32.GetLastError()
+        # 183 = ERROR_ALREADY_EXISTS, 5 = ERROR_ACCESS_DENIED (admin instance exists)
+        if last_error in (183, 5) or _app_mutex == 0:
+            already_running = True
+
+    if already_running:
         logger.warning("Another instance is already running.")
         show_messagebox(
             "GC Toxic Shield",
             "Aplikasi GC Toxic Shield sudah berjalan di System Tray.\n"
             "Cek ikon perisai merah di pojok kanan bawah.",
-            0x30 # Warning Icon
+            0x30  # Warning Icon
         )
         sys.exit(0)
-    return mutex
 
-_app_mutex = None
+    return _app_mutex
 
 
 def create_tray_image():
@@ -229,7 +256,6 @@ def main():
             from app.auth_service import AuthService
             from app.login_dialog import LoginDialog
             from app.network_client import NetworkClient
-            from app.installer_guard import InstallerGuard
         except ImportError as e:
             show_messagebox("GC Toxic Shield — Import Error", str(e), 0x10)
             sys.exit(1)
@@ -379,46 +405,6 @@ def main():
         auto_update_timer.timeout.connect(lambda: threading.Thread(target=_check_github_update_background, daemon=True).start())
         auto_update_timer.start(4 * 3600 * 1000)
 
-        # ── Installer Guard Override Handler ──
-        from PySide6.QtCore import QObject, Signal
-        class BlockSignalHandler(QObject):
-            sig_request_override = Signal(str, str, str, object, object)
-            
-        block_handler = BlockSignalHandler()
-        
-        def _handle_block_request(process_name, keyword, source, result_dict, event):
-            from app.overlay import InstallerBlockDialog
-            dlg = InstallerBlockDialog(
-                process_name=process_name,
-                keyword=keyword,
-                auth_service=auth_service,
-                parent=root
-            )
-            dlg.exec()
-            result_dict['allow'] = dlg.is_allowed()
-            event.set()
-            
-        block_handler.sig_request_override.connect(_handle_block_request)
-        
-        def _on_installer_blocked(process_name, keyword, source):
-            import threading
-            event = threading.Event()
-            result_dict = {'allow': False}
-            block_handler.sig_request_override.emit(process_name, keyword, source, result_dict, event)
-            event.wait()
-            return result_dict['allow']
-
-        # ── Start Installer Guard (Real-time setup execution block) ──
-        installer_guard = InstallerGuard(root=root, network_client=network_client)
-        installer_guard.on_blocked_callback = _on_installer_blocked
-        installer_guard.set_block_installer(bool(block_installer_cfg))
-        installer_guard.set_block_settings(bool(block_settings_cfg))
-        if block_installer_cfg or block_settings_cfg:
-            installer_guard.enable()
-        dashboard._installer_guard = installer_guard
-        if network_client:
-            network_client._installer_guard = installer_guard
-
         # ── Login Helper ──
 
         def show_login_dialog_async(on_success, exit_mode=False, on_cancel=None):
@@ -493,8 +479,6 @@ def main():
                 dashboard.is_maintenance_mode = not dashboard.is_maintenance_mode
                 if dashboard.is_maintenance_mode:
                     logger.warning("⚙️ Maintenance Mode ENABLED by Admin")
-                    if hasattr(dashboard, "_installer_guard") and dashboard._installer_guard:
-                        dashboard._installer_guard.disable()
                     if engine:
                         engine.stop()
                     SystemService.toggle_windows_settings(False)
@@ -502,10 +486,6 @@ def main():
                     SystemService.unharden_app_directory()
                 else:
                     logger.warning("⚙️ Maintenance Mode DISABLED. Protections restoring...")
-                    if hasattr(dashboard, "_installer_guard") and dashboard._installer_guard:
-                        block_installer = auth_service.get_config("BlockInstaller", False)
-                        block_settings = auth_service.get_config("BlockSettings", False)
-                        dashboard._installer_guard.reload(block_installer=block_installer, block_settings=block_settings)
                     if engine:
                         engine.start()
                     SystemService.harden_app_directory()
@@ -599,7 +579,6 @@ def main():
         sys.exit(app.exec())
 
         # Cleanup
-        installer_guard.disable()
         engine.stop()
         logger_svc.stop()
         tray_icon.stop()
@@ -614,6 +593,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # Check singleton SEBELUM elevasi UAC agar instance kedua langsung exit tanpa redundansi
+    enforce_singleton()
+
     if not check_admin():
         import ctypes
         import sys

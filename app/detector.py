@@ -83,32 +83,6 @@ class ToxicDetector:
         self._context_exclusions: dict = {}
 
         self._load_wordlist()
-        
-        self._ai_detector = None
-        self._init_ai_detector()
-
-    def _init_ai_detector(self):
-        try:
-            from app.nlp_detector import NLPDetector
-            import os
-            model_path = os.path.join(os.getcwd(), "nlp_model.pkl")
-            if os.path.exists(model_path):
-                self._ai_detector = NLPDetector(model_path=model_path)
-                if not self._ai_detector.is_loaded:
-                    self._ai_detector = None
-        except ImportError:
-            self._ai_detector = None
-            
-    def reload_ai_model(self, model_path):
-        try:
-            from app.nlp_detector import NLPDetector
-            self._ai_detector = NLPDetector(model_path=model_path)
-            if self._ai_detector.is_loaded:
-                logger.info("AI NLP Model di-reload dengan sukses!")
-            else:
-                self._ai_detector = None
-        except Exception as e:
-            logger.error(f"Gagal reload AI: {e}")
 
     # ================================================================
     # PUBLIC API
