@@ -597,9 +597,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # Check singleton SEBELUM elevasi UAC agar instance kedua langsung exit tanpa redundansi
-    enforce_singleton()
-
     if not check_admin():
         import ctypes
         import sys

@@ -178,7 +178,8 @@ if %ERRORLEVEL% NEQ 0 (
 
 if exist "{extract_dir}" rmdir /S /Q "{extract_dir}"
 
-start /B "" "{os.path.join(app_dir, exe_name)}" --background
+del /F /Q "%TEMP%\\gc_toxic_shield.lock" > nul 2>&1
+start "" "{os.path.join(app_dir, exe_name)}" --background
 
 del "{zip_path}" > nul 2>&1
 del "%~f0"
