@@ -45,7 +45,7 @@ def check_pyinstaller():
 
 def build():
     print("\n" + "━" * 60)
-    print("  GC Toxic Shield — Build Script (Google Speech Edition) v2.0.1")
+    print("  GC Toxic Shield — Build Script (Google Speech Edition) v2.0.2")
     print("━" * 60 + "\n")
 
     if not check_pyinstaller():

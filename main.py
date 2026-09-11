@@ -46,7 +46,7 @@ logger = logging.getLogger("GCToxicShield")
 
 # ── Constants ────────────────────────────────────────────────
 APP_NAME = "GC Toxic Shield"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 BRAND = "GC Net Security Suite"
 GITHUB_REPO = "galangjrr/GC-Toxic-Shield"  # <-- Admin warns to replace this
 
@@ -579,15 +579,23 @@ def main():
         logger.info("  🖥️  Dashboard      : %s", "HIDDEN" if start_hidden else "VISIBLE")
         logger.info("━" * 50)
 
+        # ── Cleanup on Exit ──
+        def _cleanup():
+            logger.info("Shutting down services...")
+            try: engine.stop()
+            except Exception: pass
+            try: logger_svc.stop()
+            except Exception: pass
+            try: tray_icon.stop()
+            except Exception: pass
+            if network_client:
+                try: network_client.stop()
+                except Exception: pass
+
+        app.aboutToQuit.connect(_cleanup)
+
         # ── Main Loop ──
         sys.exit(app.exec())
-
-        # Cleanup
-        engine.stop()
-        logger_svc.stop()
-        tray_icon.stop()
-        if network_client:
-            network_client.stop()
 
     except Exception as e:
         # Catch-all for any startup crash

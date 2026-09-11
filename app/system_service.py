@@ -179,41 +179,38 @@ class SystemService:
     @staticmethod
     def toggle_windows_settings(enable_lock: bool) -> bool:
         """
-        Registry cleanup for Windows Settings & Control Panel.
+        Kunci atau buka Windows Settings & Control Panel via Registry.
 
-        ALWAYS deletes NoControlPanel from the registry (cleanup).
-        The actual Settings/Control Panel blocking is now handled by
-        InstallerGuard at the process level.
+        enable_lock = True:
+            Set NoControlPanel = 1 di HKCU Policies\\Explorer
+            → Control Panel & Settings dikunci.
+        enable_lock = False:
+            Hapus NoControlPanel (clean rollback).
 
-        Target: HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer
-        Value:  NoControlPanel (REG_DWORD)
-
-        Args:
-            enable_lock: Kept for backward compat. Both True and False
-                         perform the same cleanup (delete NoControlPanel).
-
-        Returns:
-            True if operation succeeded.
+        Target: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer
         """
         try:
             import winreg
-
-            # Always clean up the registry value (both enable and disable)
-            try:
-                key = winreg.OpenKey(
-                    winreg.HKEY_CURRENT_USER,
-                    SystemService.POLICIES_EXPLORER_PATH,
-                    0,
-                    winreg.KEY_SET_VALUE,
-                )
-                winreg.DeleteValue(key, "NoControlPanel")
-                winreg.CloseKey(key)
-                logger.info("✓ Registry cleanup: NoControlPanel removed (enforcement via InstallerGuard)")
-            except FileNotFoundError:
-                logger.info("NoControlPanel was not set — registry already clean")
-
-            # Broadcast WM_SETTINGCHANGE to all windows immediately after registry changes
             import ctypes
+
+            key = winreg.CreateKeyEx(
+                winreg.HKEY_CURRENT_USER,
+                SystemService.POLICIES_EXPLORER_PATH,
+                0,
+                winreg.KEY_SET_VALUE,
+            )
+            if enable_lock:
+                winreg.SetValueEx(key, "NoControlPanel", 0, winreg.REG_DWORD, 1)
+                logger.info("✓ Windows Settings LOCKED (NoControlPanel=1)")
+            else:
+                try:
+                    winreg.DeleteValue(key, "NoControlPanel")
+                    logger.info("✓ Windows Settings UNLOCKED (NoControlPanel removed)")
+                except FileNotFoundError:
+                    logger.info("NoControlPanel was not set — registry already clean")
+            winreg.CloseKey(key)
+
+            # Broadcast WM_SETTINGCHANGE agar Windows refresh seketika
             HWND_BROADCAST = 0xFFFF
             WM_SETTINGCHANGE = 0x001A
             SMTO_ABORTIFHUNG = 0x0002
@@ -241,6 +238,7 @@ class SystemService:
         except Exception as e:
             logger.error("✗ Failed to toggle Windows Settings: %s", e)
             return False
+
 
     @staticmethod
     def is_windows_settings_locked() -> bool:
@@ -362,82 +360,43 @@ class SystemService:
 
     POLICIES_INSTALLER_PATH = r"Software\Policies\Microsoft\Windows\Installer"
 
+
     @staticmethod
     def toggle_installer_block(enable_block: bool) -> bool:
         """
-        Registry cleanup for installer blocking (MSI & EXE).
+        Kunci atau buka instalasi MSI via Group Policy Registry.
 
-        ALWAYS deletes DisableMSI from HKLM and DisallowRun + its subkey
-        from HKCU, regardless of the enable_block parameter.
-        The actual installer blocking is now handled by InstallerGuard's
-        WMI/Window monitoring.
+        enable_block = True:
+            Set DisableMSI = 2 di HKLM\\Software\\Policies\\Microsoft\\Windows\\Installer
+            → Mencegah instalasi MSI oleh user biasa.
+        enable_block = False:
+            Hapus DisableMSI (clean rollback).
 
-        Target: HKLM & HKCU Policies
-        Args:
-            enable_block: Kept for backward compat. Both True and False
-                          perform the same cleanup (delete registry values).
         Returns: True jika berhasil.
         """
         try:
             import winreg
-
-            # Always clean up: delete DisableMSI from HKLM
-            try:
-                key_msi = winreg.OpenKey(
-                    winreg.HKEY_LOCAL_MACHINE,
-                    SystemService.POLICIES_INSTALLER_PATH,
-                    0,
-                    winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
-                )
-                winreg.DeleteValue(key_msi, "DisableMSI")
-                winreg.CloseKey(key_msi)
-                logger.info("✓ Registry cleanup: DisableMSI removed")
-            except FileNotFoundError:
-                logger.info("DisableMSI was not set — registry already clean")
-
-            # Always clean up: delete DisallowRun subkey from HKCU
-            try:
-                disallow_path = SystemService.POLICIES_EXPLORER_PATH + r"\DisallowRun"
-                key_disallow = winreg.OpenKey(
-                    winreg.HKEY_CURRENT_USER,
-                    disallow_path,
-                    0,
-                    winreg.KEY_ALL_ACCESS,
-                )
-                # Enumerate and delete all values in the subkey
-                try:
-                    while True:
-                        name, _, _ = winreg.EnumValue(key_disallow, 0)
-                        winreg.DeleteValue(key_disallow, name)
-                except OSError:
-                    pass
-                winreg.CloseKey(key_disallow)
-                # Delete the subkey itself
-                winreg.DeleteKey(
-                    winreg.HKEY_CURRENT_USER,
-                    disallow_path,
-                )
-            except FileNotFoundError:
-                pass
-
-            # Always clean up: delete DisallowRun value from Explorer policies
-            try:
-                key_expl = winreg.OpenKey(
-                    winreg.HKEY_CURRENT_USER,
-                    SystemService.POLICIES_EXPLORER_PATH,
-                    0,
-                    winreg.KEY_SET_VALUE,
-                )
-                winreg.DeleteValue(key_expl, "DisallowRun")
-                winreg.CloseKey(key_expl)
-                logger.info("✓ Registry cleanup: DisallowRun removed")
-            except FileNotFoundError:
-                logger.info("DisallowRun was not set — registry already clean")
-
-            logger.info("✓ Installer registry cleanup complete (enforcement via InstallerGuard)")
-            
-            # Broadcast WM_SETTINGCHANGE to all windows immediately after registry changes
             import ctypes
+
+            # Toggle DisableMSI di HKLM
+            key_msi = winreg.CreateKeyEx(
+                winreg.HKEY_LOCAL_MACHINE,
+                SystemService.POLICIES_INSTALLER_PATH,
+                0,
+                winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
+            )
+            if enable_block:
+                winreg.SetValueEx(key_msi, "DisableMSI", 0, winreg.REG_DWORD, 2)
+                logger.info("✓ Installer BLOCKED (DisableMSI=2)")
+            else:
+                try:
+                    winreg.DeleteValue(key_msi, "DisableMSI")
+                    logger.info("✓ Installer UNBLOCKED (DisableMSI removed)")
+                except FileNotFoundError:
+                    logger.info("DisableMSI was not set — registry already clean")
+            winreg.CloseKey(key_msi)
+
+            # Broadcast WM_SETTINGCHANGE agar Windows refresh seketika
             HWND_BROADCAST = 0xFFFF
             WM_SETTINGCHANGE = 0x001A
             SMTO_ABORTIFHUNG = 0x0002
@@ -465,6 +424,7 @@ class SystemService:
         except Exception as e:
             logger.error("✗ Failed to toggle installer block: %s", e)
             return False
+
 
     @staticmethod
     def is_installer_blocked() -> bool:

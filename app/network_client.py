@@ -27,7 +27,6 @@ from app.penalty_manager import PenaltyManager
 from app.system_service import SystemService
 from app.detector import ToxicDetector
 from app.auth_service import AuthService
-from PySide6.QtCore import QTimer
 
 
 logger = logging.getLogger("GCToxicShield.NetworkClient")
@@ -168,27 +167,6 @@ class NetworkClient(QObject):
             self._enqueue_violation(packet), self._loop
         )
 
-    def report_blocked_installer(self, filename: str, trigger: str):
-        """
-        Melaporkan kejadian terblokirnya installer/setup oleh InstallerGuard.
-        """
-        if not self._loop:
-            return
-            
-        packet = {
-            "type": "INSTALLER_BLOCKED",
-            "filename": filename,
-            "trigger": trigger,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
-        if not self._connected:
-            self._save_to_offline_log(packet)
-            return
-            
-        asyncio.run_coroutine_threadsafe(
-            self._enqueue_violation(packet), self._loop
-        )
 
     @property
     def is_connected(self) -> bool:
