@@ -157,12 +157,13 @@ def enforce_singleton():
 
     if already_running:
         logger.warning("Another instance is already running.")
-        show_messagebox(
-            "GC Toxic Shield",
-            "Aplikasi GC Toxic Shield sudah berjalan di System Tray.\n"
-            "Cek ikon perisai merah di pojok kanan bawah.",
-            0x30  # Warning Icon
-        )
+        if "--background" not in sys.argv:
+            show_messagebox(
+                "GC Toxic Shield",
+                "Aplikasi GC Toxic Shield sudah berjalan di System Tray.\n"
+                "Cek ikon perisai merah di pojok kanan bawah.",
+                0x30  # Warning Icon
+            )
         sys.exit(0)
 
     return _app_mutex
@@ -364,8 +365,11 @@ def main():
         dashboard.set_audio_engine(engine)
 
         # ── Start Services ──
+        autostart_cfg = auth_service.get_config("AutoStart", True)
+        if autostart_cfg:
+            SystemService.enable_autostart()
         if SystemService.is_autostart_enabled():
-            logger.info("✓ Auto-start ENABLED")
+            logger.info("✓ Auto-start ENABLED (Task Scheduler + Registry)")
         
         logger_svc.start()
 

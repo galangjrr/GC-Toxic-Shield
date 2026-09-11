@@ -34,68 +34,87 @@ class SystemService:
     @staticmethod
     def enable_autostart(app_path: Optional[str] = None) -> bool:
         """
-        Mendaftarkan aplikasi ke Windows Registry agar
-        otomatis berjalan saat startup.
-
-        Key: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
-        Value: Path ke executable
-
-        Args:
-            app_path: Path ke executable. Default: sys.executable + script.
-
-        Returns:
-            True jika berhasil.
+        Mendaftarkan aplikasi ke Windows Registry dan Task Scheduler
+        agar otomatis berjalan saat startup/logon dengan privilege Administrator.
         """
+        success = False
+        import subprocess
+
+        # 1. Resolve executable and script path
+        if app_path is None:
+            if getattr(sys, 'frozen', False):
+                raw_path = sys.executable
+                reg_cmd = f'"{sys.executable}" --background'
+            else:
+                script_path = os.path.abspath(
+                    os.path.join(os.path.dirname(os.path.dirname(__file__)), "main.py")
+                )
+                raw_path = sys.executable
+                reg_cmd = f'"{sys.executable}" "{script_path}" --background'
+        else:
+            raw_path = app_path.strip('"')
+            reg_cmd = f'{app_path} --background' if "--background" not in app_path else app_path
+
+        # 2. Register Task Scheduler (wajib untuk UAC requireAdministrator tanpa prompt)
+        try:
+            task_cmd = reg_cmd
+            subprocess.run(
+                [
+                    "schtasks", "/create",
+                    "/tn", "GCToxicShield",
+                    "/tr", task_cmd,
+                    "/sc", "onlogon",
+                    "/rl", "highest",
+                    "/f"
+                ],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                timeout=5
+            )
+            logger.info("✓ Task Scheduler GCToxicShield registered (/sc onlogon /rl highest)")
+            success = True
+        except Exception as e:
+            logger.warning("schtasks registration failed: %s", e)
+
+        # 3. Register HKCU Run (fallback)
         try:
             import winreg
-
-            if app_path is None:
-                # Jika dijalankan sebagai .exe (PyInstaller)
-                if getattr(sys, 'frozen', False):
-                    app_path = f'"{sys.executable}"'
-                else:
-                    # Jalankan sebagai Python script
-                    script_path = os.path.abspath(
-                        os.path.join(
-                            os.path.dirname(os.path.dirname(__file__)),
-                            "main.py"
-                        )
-                    )
-                    app_path = f'"{sys.executable}" "{script_path}"'
-
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
                 REGISTRY_PATH,
                 0,
                 winreg.KEY_SET_VALUE,
             )
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, app_path)
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, reg_cmd)
             winreg.CloseKey(key)
-
-            logger.info("✓ Auto-start enabled: %s", app_path)
-            return True
-
-        except ImportError:
-            logger.error("winreg not available (non-Windows OS)")
-            return False
-        except PermissionError:
-            logger.error("✗ Permission denied — run as Administrator")
-            return False
+            logger.info("✓ Registry auto-start enabled: %s", reg_cmd)
+            success = True
         except Exception as e:
-            logger.error("✗ Failed to enable auto-start: %s", e)
-            return False
+            logger.warning("Registry auto-start failed: %s", e)
+
+        return success
 
     @staticmethod
     def disable_autostart() -> bool:
         """
-        Menghapus entri auto-start dari Windows Registry.
-
-        Returns:
-            True jika berhasil.
+        Menghapus entri auto-start dari Registry dan Task Scheduler.
         """
+        import subprocess
+        # 1. Delete Task Scheduler
+        try:
+            subprocess.run(
+                ["schtasks", "/delete", "/tn", "GCToxicShield", "/f"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                timeout=5
+            )
+            logger.info("✓ Task Scheduler GCToxicShield removed")
+        except Exception:
+            pass
+
+        # 2. Delete Registry
         try:
             import winreg
-
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
                 REGISTRY_PATH,
@@ -104,27 +123,37 @@ class SystemService:
             )
             try:
                 winreg.DeleteValue(key, APP_NAME)
-                logger.info("✓ Auto-start disabled")
+                logger.info("✓ Registry auto-start disabled")
             except FileNotFoundError:
-                logger.info("Auto-start was not enabled")
+                pass
             winreg.CloseKey(key)
             return True
-
-        except ImportError:
-            logger.error("winreg not available")
-            return False
         except Exception as e:
-            logger.error("✗ Failed to disable auto-start: %s", e)
+            logger.error("Failed to disable registry auto-start: %s", e)
             return False
 
     @staticmethod
     def is_autostart_enabled() -> bool:
         """
-        Cek apakah auto-start sudah aktif di Registry.
+        Cek apakah auto-start aktif (Task Scheduler atau Registry).
         """
+        import subprocess
+        # 1. Check Task Scheduler
+        try:
+            res = subprocess.run(
+                ["schtasks", "/query", "/tn", "GCToxicShield"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                timeout=5
+            )
+            if res.returncode == 0:
+                return True
+        except Exception:
+            pass
+
+        # 2. Check Registry
         try:
             import winreg
-
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
                 REGISTRY_PATH,
@@ -138,7 +167,6 @@ class SystemService:
             except FileNotFoundError:
                 winreg.CloseKey(key)
                 return False
-
         except Exception:
             return False
 

@@ -447,6 +447,10 @@ class NetworkClient(QObject):
                 logger.info("⚡ RESET_LEVEL command received")
                 self._dispatch_remote_reset_level()
 
+            elif ptype == "RESTART_APP":
+                logger.info("⚡ RESTART_APP command received")
+                self._dispatch_restart_app()
+
             elif ptype in ("SYNC_SANCTIONS", "SYNC_SANCTIONS_TARGETED"):
                 sanction_list = packet.get("sanction_list", [])
                 logger.info("📡 %s received (%d items)", ptype, len(sanction_list))
@@ -664,6 +668,29 @@ class NetworkClient(QObject):
             updater.download_and_install_async(dl_url)
         else:
             logger.info("No newer version found on Github or update failed.")
+
+    def _dispatch_restart_app(self):
+        """Restart proses aplikasi GC Toxic Shield secara senyap di background."""
+        import subprocess
+        import sys
+        import os
+        raw_exe = sys.executable
+        if getattr(sys, 'frozen', False):
+            cmd = [raw_exe, "--background"]
+        else:
+            script_path = os.path.abspath(
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), "main.py")
+            )
+            cmd = [raw_exe, script_path, "--background"]
+        try:
+            logger.info("Restarting application: %s", cmd)
+            subprocess.Popen(
+                cmd,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+        except Exception as e:
+            logger.error("Failed to spawn restarted instance: %s", e)
+        os._exit(0)
 
     def _dispatch_update_config(self, new_config: dict):
         """Emit update config signal."""
